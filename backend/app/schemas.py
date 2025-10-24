@@ -1,16 +1,62 @@
 from pydantic import BaseModel, EmailStr
+from typing import Optional
+from datetime import datetime
 
-# Incoming data for registration
-class UserCreate(BaseModel):
-    username: str
+# User schemas
+class UserBase(BaseModel):
     email: EmailStr
+    username: str
+
+class UserCreate(UserBase):
     password: str
 
-# Response model for user
-class User(BaseModel):
+class User(UserBase):
     id: int
-    username: str
-    email: EmailStr
+    created_at: datetime
 
     class Config:
         from_attributes = True  # for Pydantic v2
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+    user_id: int
+    email: str
+
+# Workout schemas
+class WorkoutBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    difficulty: str
+    duration: int # in minutes
+
+class Workout(WorkoutBase):
+    pass
+
+class Workout(WorkoutBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+    
+# Progress tracking schemas
+class ProgressBase(BaseModel):
+    workout_id: int
+    completed: bool
+    notes: Optional[str] = None
+
+class ProgressCreate(ProgressBase):
+    pass
+
+class Progress(ProgressBase):
+    id: int
+    user_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

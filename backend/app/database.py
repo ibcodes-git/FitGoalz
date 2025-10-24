@@ -1,22 +1,23 @@
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from dotenv import load_dotenv
-import os
 
-# Load environment variables
-load_dotenv()
+# SQLite database URL
+SQLALCHEMY_DATABASE_URL = "sqlite:///./fitgoalz.db"
 
-# Database URL (SQLite for now - easy for local testing)
-DATABASE_URL = os.getenv("DATABASE_URL","sqlite:///./fitgoalz.db")
-
+#Create engine
 engine = create_engine(
-    DATABASE_URL, connect_args= {"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+    SQLALCHEMY_DATABASE_URL, 
+    connect_args={"check_same_thread": False}
 )
+
+#Create SessionLocal class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+#Create Base Class
 Base = declarative_base()
 
-# Dependency to get DB session
+# Dependency
 def get_db():
     db = SessionLocal()
     try:

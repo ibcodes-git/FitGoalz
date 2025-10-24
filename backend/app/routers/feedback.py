@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-router = APIRouter()
+router = APIRouter(prefix="/feedback", tags=["feedback"])
 
-@router.get("/test")
-def test_feedback():
-    return {"message": "Feedback router is working"}
+@router.get("/")
+async def get_feedback():
+    return {"message": "Feedback endpoint"}

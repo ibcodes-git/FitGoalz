@@ -1,17 +1,52 @@
+# backend/app/main.py
 from fastapi import FastAPI
-from app.database import Base, engine
-from app.routers import auth, workouts, feedback
+from fastapi.middleware.cors import CORSMiddleware
+from app.database import engine
+from app import models
 
-Base.metadata.create_all(bind=engine)
-app = FastAPI(title="FitGoalz API")
+app = FastAPI(title="FitGoalz API", version="1.0.0")
 
-# Including all routers
-app.include_router(auth.router, tags=["Auth"])
-app.include_router(workouts.router, tags=["Workouts"])
-app.include_router(feedback.router, tags=["Feedback"])
+# Comprehensive CORS configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for development
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
+)
 
+# Database setup
+@app.on_event("startup")
+async def startup_event():
+    models.Base.metadata.create_all(bind=engine)
+    print("✓ Database tables created")
+
+# Import routers
+try:
+    from app.routers import auth
+    app.include_router(auth.router)
+    print("✓ Auth router loaded successfully")
+except Exception as e:
+    print(f"✗ Failed to load auth router: {e}")
+
+try:
+    from app.routers import workouts
+    app.include_router(workouts.router)
+    print("✓ Workouts router loaded successfully")
+except Exception as e:
+    print(f"✗ Failed to load workouts router: {e}")
+
+try:
+    from app.routers import feedback
+    app.include_router(feedback.router)
+    print("✓ Feedback router loaded successfully")
+except Exception as e:
+    print(f"✗ Failed to load feedback router: {e}")
 
 @app.get("/")
-def read_root():
+async def root():
     return {"message": "FitGoalz API is running"}
 
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "service": "FitGoalz API"}
