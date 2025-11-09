@@ -7,7 +7,7 @@ export default function LoginScreen({ navigation }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async () => {
+ const handleLogin = async () => {
   if (!email || !password) {
     Alert.alert('Error', 'Please fill in all fields');
     return;
@@ -15,21 +15,42 @@ export default function LoginScreen({ navigation }) {
 
   setLoading(true);
   try {
-    const response = await authAPI.api.post('/auth/login', 
-      `username=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`,
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      }
-    );
+    console.log('🔍 Attempting login with:', { email, password });
     
-    const token = response.data.access_token;
-    Alert.alert('Success', 'Login successful!');
-    navigation.navigate('Dashboard', { token });
+    const formData = `username=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`;
+    
+    console.log('🔍 Sending to: http://192.168.0.14:8000/auth/login');
+    
+    const response = await fetch('http://192.168.0.14:8000/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: formData,
+    });
+
+    console.log('🔍 Response status:', response.status);
+    console.log('🔍 Response headers:', Object.fromEntries(response.headers));
+    
+    if (!response.ok) {
+      // Network error - backend not reachable
+      console.log('💥 Backend not reachable or server error');
+      Alert.alert('Network Error', 'Cannot connect to server. Check if backend is running.');
+      return;
+    }
+
+    const responseText = await response.text();
+    console.log('🔍 Raw response:', responseText);
+
+    if (response.ok) {
+      const data = JSON.parse(responseText);
+      console.log('🎉 Login successful, token received!');
+      Alert.alert('Success', 'Login successful!');
+      navigation.navigate('Dashboard', { token: data.access_token });
+    }
   } catch (error) {
-    Alert.alert('Error', `Login failed: ${error.response?.data?.detail || 'Check your credentials'}`);
-    console.error('Login error details:', error.response?.data);
+    console.log('💥 Network error details:', error);
+    Alert.alert('Connection Error', `Cannot connect to server: ${error.message}\n\nMake sure backend is running on http://192.168.0.14:8000`);
   } finally {
     setLoading(false);
   }
