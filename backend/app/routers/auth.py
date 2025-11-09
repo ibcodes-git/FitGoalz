@@ -181,5 +181,3 @@ async def test_protected(current_user: models.User = Depends(get_current_user)):
         "user": current_user.email,
         "user_id": current_user.id
     }
-
-    

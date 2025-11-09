@@ -9,13 +9,7 @@ app = FastAPI(title="FitGoalz API", version="1.0.0")
 # Comprehensive CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000",
-        "http://localhost:8081",
-        "http://192.168.0.14:8081",  # Your Expo server
-        "http://192.168.0.13:*",     # Your phone's IP
-        "exp://192.168.0.14:8081",   # Expo URL
-        "*"   
-    ],                        # Allow all for testing
+    allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
     allow_methods=["*"],  # Allow all methods
     allow_headers=["*"],  # Allow all headers
