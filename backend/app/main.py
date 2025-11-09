@@ -3,6 +3,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine
 from app import models
+from app.models import User
+from app.routers import auth
 
 app = FastAPI(title="FitGoalz API", version="1.0.0")
 

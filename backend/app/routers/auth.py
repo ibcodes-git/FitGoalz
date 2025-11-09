@@ -19,8 +19,22 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Password verification
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    print(f"🔐 VERIFY_PASSWORD CALLED")
+    print(f"   Plain password: {plain_password}")
+    print(f"   Hashed password: {hashed_password}")
+    
+    if not plain_password or not hashed_password:
+        print("❌ Missing password or hash")
+        return False
+    
+    try:
+        result = pwd_context.verify(plain_password, hashed_password)
+        print(f"✅ Password verification result: {result}")
+        return result
+    except Exception as e:
+        print(f"❌ Password verification error: {str(e)}")
+        return False
 
 def get_password_hash(password):
     return pwd_context.hash(password)
@@ -85,9 +99,15 @@ async def get_current_user(
 # Registration endpoint
 @router.post("/register", response_model=schemas.User)
 async def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    # Check if user already exists
+    print("=== 🔍 REGISTRATION DEBUG START ===")
+    print(f"📧 Registering user: {user.email}")
+    print(f"👤 Username: {user.username}")
+    print(f"🔑 Plain password: {user.password}")
+    
+    # Check if user exists
     db_user = get_user_by_email(db, email=user.email)
     if db_user:
+        print("❌ USER ALREADY EXISTS")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
@@ -95,6 +115,8 @@ async def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
     
     # Hash password and create user
     hashed_password = get_password_hash(user.password)
+    print(f"🔐 Hashed password: {hashed_password}")
+    
     db_user = models.User(
         email=user.email,
         username=user.username,
@@ -103,6 +125,9 @@ async def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
+    
+    print("✅ REGISTRATION SUCCESSFUL")
+    print("=== 🔍 REGISTRATION DEBUG END ===")
     return db_user
 
 # Login endpoint
@@ -111,12 +136,37 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
-    user = authenticate_user(db, form_data.username, form_data.password)
+    print("=== 🔍 LOGIN DEBUG START ===")
+    print(f"📧 Username received: {form_data.username}")
+    print(f"🔑 Password received: {form_data.password}")
+    
+    user = get_user_by_email(db, form_data.username)
     if not user:
+        print("❌ USER NOT FOUND IN DATABASE")
+        print("=== 🔍 LOGIN DEBUG END ===")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Incorrect username or password",
         )
+    
+    print(f"✅ User found in database: {user.email}")
+    print(f"🔐 Stored password hash: {user.password_hash}")
+    
+    # Debug password verification
+    print("🔍 Verifying password...")
+    password_correct = pwd_context.verify(form_data.password, user.password_hash)
+    print(f"🔍 Password verification result: {password_correct}")
+    
+    if not password_correct:
+        print("❌ PASSWORD VERIFICATION FAILED")
+        print("=== 🔍 LOGIN DEBUG END ===")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+        )
+    
+    print("🎉 LOGIN SUCCESSFUL - Password matches!")
+    print("=== 🔍 LOGIN DEBUG END ===")
     
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
@@ -125,7 +175,7 @@ async def login(
     
     return {
         "access_token": access_token,
-        "token_type": "bearer",
+        "token_type": "bearer", 
         "user_id": user.id,
         "email": user.email
     }
@@ -180,4 +230,20 @@ async def test_protected(current_user: models.User = Depends(get_current_user)):
         "message": "This is a protected endpoint", 
         "user": current_user.email,
         "user_id": current_user.id
+
+    }
+
+@router.get("/debug/users")
+async def debug_users(db: Session = Depends(get_db)):
+    users = db.query(User).all()
+    return {
+        "users": [
+            {
+                "id": u.id, 
+                "email": u.email, 
+                "password_hash": u.password_hash,
+                "created_at": u.created_at
+            } 
+            for u in users
+        ]
     }
