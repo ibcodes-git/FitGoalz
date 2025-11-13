@@ -3,8 +3,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine
 from app import models
-from app.models import User
-from app.routers import auth
 
 app = FastAPI(title="FitGoalz API", version="1.0.0")
 
@@ -21,29 +19,29 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     models.Base.metadata.create_all(bind=engine)
-    print("✓ Database tables created")
+    print("✅ Database tables created")
 
 # Import routers
 try:
     from app.routers import auth
-    app.include_router(auth.router)
-    print("✓ Auth router loaded successfully")
+    app.include_router(auth.router, prefix="/api")
+    print("✅ Auth router loaded successfully")
 except Exception as e:
-    print(f"✗ Failed to load auth router: {e}")
+    print(f"❌ Failed to load auth router: {e}")
 
 try:
     from app.routers import workouts
-    app.include_router(workouts.router)
-    print("✓ Workouts router loaded successfully")
+    app.include_router(workouts.router, prefix="/api")
+    print("✅ Workouts router loaded successfully")
 except Exception as e:
-    print(f"✗ Failed to load workouts router: {e}")
+    print(f"❌ Failed to load workouts router: {e}")
 
 try:
     from app.routers import feedback
-    app.include_router(feedback.router)
-    print("✓ Feedback router loaded successfully")
+    app.include_router(feedback.router, prefix="/api")
+    print("✅ Feedback router loaded successfully")
 except Exception as e:
-    print(f"✗ Failed to load feedback router: {e}")
+    print(f"❌ Failed to load feedback router: {e}")
 
 @app.get("/")
 async def root():
