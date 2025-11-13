@@ -1,75 +1,73 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
 import { authAPI } from '../services/api';
 
-export default function RegisterScreen({ navigation }) {
-  const [email, setEmail] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+const RegisterScreen = ({ navigation }) => {
+  const [formData, setFormData] = useState({
+    email: '',
+    username: '',
+    password: '',
+    confirmPassword: '',
+  });
   const [loading, setLoading] = useState(false);
 
-//   const handleRegister = async () => {
-//   if (!email || !username || !password) {
-//     Alert.alert('Error', 'Please fill in all fields');
-//     return;
-//   }
-
-//   setLoading(true);
-//   try {
-//     console.log('Attempting registration with:', { email, username, password });
-    
-//     const response = await authAPI.register({
-//       email: email,
-//       username: username,
-//       password: password
-//     });
-    
-//     console.log('Registration successful:', response.data);
-//     Alert.alert('Success', 'Registration successful! Please login.');
-//     navigation.navigate('Login');
-//   } catch (error) {
-//     console.log('Full registration error:', error);
-//     console.log('Error response:', error.response?.data);
-//     Alert.alert('Error', `Registration failed: ${error.response?.data?.detail || error.message}`);
-//   } finally {
-//     setLoading(false);
-//   }
-// };
-
 const handleRegister = async () => {
-  setLoading(true);
-  try {
-    const response = await fetch('http://192.168.0.14:8000/auth/register', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify({
-        email: email,
-        username: username,
-        password: password
-      }),
-    });
+    const { email, username, password, confirmPassword } = formData;
     
-    console.log('Response status:', response.status);
-    
-    if (response.ok) {
-      const data = await response.json();
-      Alert.alert('Success', 'Registration successful!');
-      navigation.navigate('Login');
-    } else {
-      const errorText = await response.text();
-      console.log('Error response:', errorText);
-      Alert.alert('Error', `HTTP ${response.status}: ${errorText}`);
+    if (!email || !username || !password || !confirmPassword) {
+      Alert.alert('Error', 'Please fill in all fields');
+      return;
     }
-  } catch (error) {
-    console.log('Network error:', error);
-    Alert.alert('Error', `Network error: ${error.message}`);
-  } finally {
-    setLoading(false);
-  }
-};
+
+    if (password !== confirmPassword) {
+      Alert.alert('Error', 'Passwords do not match');
+      return;
+    }
+
+    if (password.length < 6) {
+      Alert.alert('Error', 'Password must be at least 6 characters');
+      return;
+    }
+    
+    setLoading(true);
+    try {
+
+      console.log('🔄 Attempting registration with:', { email, username });
+      const response = await authAPI.register({ email, username, password });
+      console.log('✅ Registration response:', response.data);
+
+      Alert.alert('Success', 'Registration successful! Please login.');
+      navigation.navigate('Login');
+    } catch (error) {
+      console.log('❌ Full registration error object:', error);
+      console.log('📡 Error response data:', error.response?.data);
+      console.log('🔴 Error status:', error.response?.status);
+      console.log('📋 Error message:', error.message);
+
+      // Better error message
+      let errorMessage = 'Registration failed - unknown error';
+
+      if (error.response?.data?.detail) {
+      errorMessage = error.response.data.detail;
+      } else if (error.message) {
+      errorMessage = error.message;
+      } else if (error.response?.status === 404) {
+      errorMessage = 'Backend server not found. Make sure backend is running on localhost:8000';
+      } else if (error.response?.status === 500) {
+      errorMessage = 'Server error - check backend logs';
+      }
+
+      Alert.alert('Registration Failed', errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+    
+  const updateFormData = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  
 
   return (
     <View style={styles.container}>
@@ -79,8 +77,8 @@ const handleRegister = async () => {
       <TextInput
         style={styles.input}
         placeholder="Email"
-        value={email}
-        onChangeText={setEmail}
+        value={formData.email}
+        onChangeText={(value) => updateFormData('email', value)}
         keyboardType="email-address"
         autoCapitalize="none"
       />
@@ -88,21 +86,30 @@ const handleRegister = async () => {
       <TextInput
         style={styles.input}
         placeholder="Username"
-        value={username}
-        onChangeText={setUsername}
+        value={formData.username}
+        onChangeText={(value) => updateFormData('username', value)}
         autoCapitalize="none"
       />
       
       <TextInput
         style={styles.input}
-        placeholder="Password (min. 6 characters)"
-        value={password}
-        onChangeText={setPassword}
+        placeholder="Password"
+        value={formData.password}
+        onChangeText={(value) => updateFormData('password', value)}
+        secureTextEntry
+      />
+
+      <TextInput
+        style={styles.input}
+        placeholder="Confirm Password"
+        value={formData.confirmPassword}
+        onChangeText={(value) => updateFormData('confirmPassword', value)}
         secureTextEntry
       />
       
+      
       <TouchableOpacity 
-        style={styles.button} 
+        style={[styles.button, loading && styles.buttonDisabled]} 
         onPress={handleRegister}
         disabled={loading}
       >
@@ -164,3 +171,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 });
+
+export default RegisterScreen;

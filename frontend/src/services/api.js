@@ -1,6 +1,7 @@
 ﻿import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_BASE_URL = 'http://192.168.0.14:8000';
+const API_BASE_URL = 'http://192.168.0.17:8000';
 
 // Create the axios instance
 export const api = axios.create({
@@ -10,27 +11,89 @@ export const api = axios.create({
   },
 });
 
+// Add request interceptor to include token automatically
+api.interceptors.request.use(
+  async (config) => {
+    const token = await AsyncStorage.getItem('userToken');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Add response interceptor to handle errors
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Token expired or invalid
+      AsyncStorage.removeItem('userToken');
+      // You can redirect to login here if needed
+    }
+    return Promise.reject(error);
+  }
+);
+
+// Token management functions
+export const tokenService = {
+  setToken: async (token) => {
+    await AsyncStorage.setItem('userToken', token);
+    // Also set it in axios default headers
+    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  },
+
+  getToken: async () => {
+    return await AsyncStorage.getItem('userToken');
+  },
+
+  removeToken: async () => {
+    await AsyncStorage.removeItem('userToken');
+    delete api.defaults.headers.common['Authorization'];
+  },
+};
+
 // Auth API calls
 export const authAPI = {
-  register: (userData) => api.post('/auth/register', userData),
-  login: (userData) => {
+  register: (userData) => api.post('api/auth/register', userData),
+
+  login: async (userData) => {
     const formData = new URLSearchParams();
-    formData.append('username', userData.username);
+    formData.append('username', userData.email); // Changed from userData.username
     formData.append('password', userData.password);
-    return api.post('/auth/login', formData, {
+
+    const response = await api.post('api/auth/login', formData, {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
     });
+
+    // Auto-store token on successful login
+    if (response.data.access_token) {
+      await tokenService.setToken(response.data.access_token);
+    }
+    
+    return response;
   },
-  getProfile: (token) => api.get('/auth/me', {
-    headers: { Authorization: `Bearer ${token}` }
-  }),
+    
+  getProfile: () => api.get('api/auth/me'), // Token is auto-added by interceptor
+  
+  logout: async () => {
+    await tokenService.removeToken();
+  },
 };
 
 // Workouts API calls
 export const workoutsAPI = {
-  generate: (userData, token) => api.post('/workouts/generate', userData, {
-    headers: { Authorization: `Bearer ${token}` }
-  }),
+  generate: (userData) => api.post('api/workouts/generate', userData), // Token auto-added
+  getWorkouts: () => api.get('api/workouts/'),
+};
+
+// User API calls
+export const userAPI = {
+  getProfile: () => api.get('api/auth/me'),
+  updateProfile: (userData) => api.put('api/users/profile', userData),
 };

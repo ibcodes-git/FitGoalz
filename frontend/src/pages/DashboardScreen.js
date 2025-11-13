@@ -2,22 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { authAPI, workoutsAPI } from '../services/api';
 
-export default function DashboardScreen({ route, navigation }) {
-  const { token } = route.params || {};
+export default function DashboardScreen({ navigation }) {
   const [user, setUser] = useState(null);
   const [workoutPlan, setWorkoutPlan] = useState(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (token) {
-      fetchUserProfile();
-    }
-  }, [token]);
+    fetchUserProfile();
+  }, []);
 
   const fetchUserProfile = async () => {
     try {
-      const response = await authAPI.getProfile(token);
+      console.log('🔄 Fetching user profile...');
+      const response = await authAPI.getProfile();
       setUser(response.data);
+      console.log('✅ User profile loaded:', response.data);
     } catch (error) {
       Alert.alert('Error', 'Failed to load user profile');
       console.error('Profile error:', error);
@@ -27,13 +26,15 @@ export default function DashboardScreen({ route, navigation }) {
   const generateWorkout = async () => {
     setLoading(true);
     try {
+      console.log('🔄 Generating workout plan...');
       const userData = {
         fitness_level: 'beginner',
         goals: 'weight_loss'
       };
-      const response = await workoutsAPI.generate(userData, token);
+      const response = await workoutsAPI.generate(userData);
       setWorkoutPlan(response.data);
       Alert.alert('Success', 'Workout plan generated!');
+      console.log('✅ Workout plan:', response.data);
     } catch (error) {
       Alert.alert('Error', 'Failed to generate workout plan');
       console.error('Workout error:', error);
@@ -42,34 +43,42 @@ export default function DashboardScreen({ route, navigation }) {
     }
   };
 
-  const handleLogout = () => {
-    navigation.navigate('Login');
+  const handleLogout = async () => {
+    try {
+      await authAPI.logout();
+      Alert.alert('Success', 'Logged out successfully');
+      navigation.navigate('Login');
+    } catch (error) {
+      Alert.alert('Error', 'Logout failed');
+    }
   };
 
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.title}>Dashboard</Text>
+      <Text style={styles.title}>FitGoalz Dashboard</Text>
       
-      {user && (
+      {user ? (
         <View style={styles.userInfo}>
           <Text style={styles.welcome}>Welcome, {user.username}!</Text>
           <Text style={styles.email}>{user.email}</Text>
         </View>
+      ) : (
+        <Text style={styles.loadingText}>Loading user info...</Text>
       )}
 
       <TouchableOpacity 
-        style={styles.workoutButton}
+        style={[styles.workoutButton, loading && styles.buttonDisabled]}
         onPress={generateWorkout}
         disabled={loading}
       >
         <Text style={styles.workoutButtonText}>
-          {loading ? 'Generating...' : 'Generate Workout Plan'}
+          {loading ? 'Generating Workout...' : 'Generate Workout Plan'}
         </Text>
       </TouchableOpacity>
 
       {workoutPlan && (
         <View style={styles.workoutPlan}>
-          <Text style={styles.workoutTitle}>{workoutPlan.plan_name}</Text>
+          <Text style={styles.workoutTitle}>Your Workout Plan</Text>
           <Text style={styles.workoutDetail}>Level: {workoutPlan.fitness_level}</Text>
           <Text style={styles.workoutDetail}>Goal: {workoutPlan.goals}</Text>
           <Text style={styles.workoutDetail}>Duration: {workoutPlan.duration} minutes</Text>
@@ -123,12 +132,20 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 5,
   },
+  loadingText: {
+    textAlign: 'center',
+    color: '#666',
+    marginBottom: 20,
+  },
   workoutButton: {
     backgroundColor: '#007AFF',
     padding: 15,
     borderRadius: 10,
     alignItems: 'center',
     marginBottom: 20,
+  },
+  buttonDisabled: {
+    backgroundColor: '#ccc',
   },
   workoutButtonText: {
     color: 'white',
