@@ -9,7 +9,7 @@ const LoginScreen = ({ navigation }) => {
 
 const testBackendConnection = async () => {
   try {
-    const response = await fetch('http://192.168.0.17:8000'); // ✅ Your actual IP
+    const response = await fetch('http://192.168.0.17:8000'); 
     const text = await response.text();
     setConnectionStatus('✅ Backend connected!');
     console.log('🌐 Backend connection test:', response.status, text);

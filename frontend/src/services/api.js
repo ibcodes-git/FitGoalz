@@ -88,12 +88,20 @@ export const authAPI = {
 
 // Workouts API calls
 export const workoutsAPI = {
-  generate: (userData) => api.post('api/workouts/generate', userData), // Token auto-added
-  getWorkouts: () => api.get('api/workouts/'),
+  // Individual endpoints (for explicit choice)
+  generateMLWorkout: () => api.post('/api/generate-ml-workout'),
+  generateAIWorkout: () => api.post('/api/generate-ai-workout'),
+  
+  // Unified endpoint (for flexible/default behavior)
+  generateWorkout: (useAI = false) => api.post('/api/generate-workout', { use_ai: useAI }),
+  
+  // Other endpoints
+  getWorkouts: () => api.get('/api/plans'),
+  compareWorkouts: () => api.post('/api/compare-workouts'),
 };
 
 // User API calls
 export const userAPI = {
-  getProfile: () => api.get('api/auth/me'),
-  updateProfile: (userData) => api.put('api/users/profile', userData),
+  getProfile: () => api.get('/api/fitness-profile'),
+  updateProfile: (userData) => api.post('/api/fitness-profile', userData),
 };

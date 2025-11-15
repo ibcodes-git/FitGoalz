@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine
 from app import models
+from app.routers import profile
 
 app = FastAPI(title="FitGoalz API", version="1.0.0")
 
@@ -20,6 +21,27 @@ app.add_middleware(
 async def startup_event():
     models.Base.metadata.create_all(bind=engine)
     print("✅ Database tables created")
+
+# Add this right before your router imports
+print("🔍 DEBUG: Checking workouts router...")
+
+try:
+    from app.routers import workouts
+    print("✅ Workouts module imported successfully")
+    
+    # Check if the new endpoints exist
+    print("🔍 DEBUG: Workouts router routes:")
+    for route in workouts.router.routes:
+        if hasattr(route, 'methods') and hasattr(route, 'path'):
+            print(f"  {route.methods} {route.path}")
+    
+    app.include_router(workouts.router, prefix="/api", tags=["workouts"])
+    print("✅ Workouts router loaded successfully")
+    
+except Exception as e:
+    print(f"❌ Failed to load workouts router: {e}")
+    import traceback
+    traceback.print_exc()
 
 # Import routers
 try:
@@ -43,6 +65,13 @@ try:
 except Exception as e:
     print(f"❌ Failed to load feedback router: {e}")
 
+try:
+    from app.routers import profile
+    app.include_router(profile.router, prefix="/api")  # This will create /api/fitness-profile etc.
+    print("✅ Profile router loaded successfully")
+except Exception as e:
+    print(f"❌ Failed to load profile router: {e}")
+
 @app.get("/")
 async def root():
     return {"message": "FitGoalz API is running"}
@@ -50,3 +79,10 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "FitGoalz API"}
+
+@app.on_event("startup")
+async def debug_routes():
+    print("🔍 DEBUG: Registered routes:")
+    for route in app.routes:
+        if hasattr(route, 'path') and hasattr(route, 'methods'):
+            print(f"  {route.methods} {route.path}")

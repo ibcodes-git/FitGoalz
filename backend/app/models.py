@@ -18,12 +18,25 @@ class UserProfile(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey('users.id'))
+
+    #Personal details
     age = Column(Integer)
     weight = Column(Float)  # in kg
     height = Column(Float)  # in cm
+    gender = Column(String) # male, female, other
+
+    # Fitness information
     fitness_level = Column(String)  # beginner, intermediate, advanced
-    goals = Column(String)  # weight_loss, muscle_gain, endurance
+    goals = Column(String)  # weight_loss, muscle_gain, endurance, general_fitness
+    workout_days = Column(Integer)  # days per week
+    workout_duration = Column(Integer)  # minutes per session
+
+    # Physical constraints
+    injuries = Column(Text)  # any injuries or limitations
+    equipment = Column(String)  # home, gym, mixed
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 class Workout(Base):
     __tablename__ = "workouts"
