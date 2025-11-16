@@ -86,18 +86,16 @@ export const authAPI = {
   },
 };
 
-// Workouts API calls
+// Workouts API calls - ML ONLY VERSION
 export const workoutsAPI = {
-  // Individual endpoints (for explicit choice)
-  generateMLWorkout: () => api.post('/api/generate-ml-workout'),
-  generateAIWorkout: () => api.post('/api/generate-ai-workout'),
+  // Main workout generation endpoint
+  generateWorkout: () => api.post('/api/generate-workout'),
   
-  // Unified endpoint (for flexible/default behavior)
-  generateWorkout: (useAI = false) => api.post('/api/generate-workout', { use_ai: useAI }),
+  // Basic workout (fallback)
+  generateBasicWorkout: () => api.post('/api/generate-basic'),
   
-  // Other endpoints
-  getWorkouts: () => api.get('/api/plans'),
-  compareWorkouts: () => api.post('/api/compare-workouts'),
+  // Get available workout plans
+  getWorkoutPlans: () => api.get('/api/plans'),
 };
 
 // User API calls

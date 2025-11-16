@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { authAPI, workoutsAPI } from '../services/api';
 
 export default function DashboardScreen({ navigation }) {
   const [user, setUser] = useState(null);
   const [workoutPlan, setWorkoutPlan] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [generationMethod, setGenerationMethod] = useState('ml'); // 'ml' or 'ai'
 
   useEffect(() => {
     fetchUserProfile();
@@ -21,29 +20,20 @@ export default function DashboardScreen({ navigation }) {
     }
   };
 
-  const generateWorkout = async (method = 'ml') => {
-    setLoading(true);
-    setGenerationMethod(method);
-    
-    try {
-      let response;
-      
-      if (method === 'ml') {
-        response = await workoutsAPI.generateMLWorkout();
-      } else if (method === 'ai') {
-        response = await workoutsAPI.generateAIWorkout();
-      }
-      
-      setWorkoutPlan(response.data);
-      Alert.alert('Success', `${method.toUpperCase()} workout generated!`);
-    } catch (error) {
-      Alert.alert('Error', `Failed to generate ${method.toUpperCase()} workout`);
-      console.error('Workout error:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  const generateWorkout = async () => {
+  setLoading(true);
+  
+  try {
+    const response = await workoutsAPI.generateWorkout(); // This calls the ML endpoint
+    setWorkoutPlan(response.data);
+    Alert.alert('Success', 'Personalized workout generated!');
+  } catch (error) {
+    Alert.alert('Error', 'Failed to generate workout. Please complete your fitness profile first.');
+    console.error('Workout error:', error);
+  } finally {
+    setLoading(false);
+  }
+};
   const handleLogout = async () => {
     try {
       await authAPI.logout();
@@ -67,46 +57,34 @@ export default function DashboardScreen({ navigation }) {
         <Text style={styles.loadingText}>Loading user info...</Text>
       )}
 
-      {/* Workout Generation Options */}
+      {/* Workout Generation Section */}
       <View style={styles.generationSection}>
         <Text style={styles.sectionTitle}>Generate Workout Plan</Text>
-        <Text style={styles.sectionSubtitle}>Choose your generation method:</Text>
+        <Text style={styles.sectionSubtitle}>
+          Get a personalized workout based on your fitness profile
+        </Text>
         
-        <View style={styles.methodButtons}>
-          <TouchableOpacity 
-            style={[
-              styles.methodButton, 
-              generationMethod === 'ml' && styles.methodButtonActive,
-              loading && styles.buttonDisabled
-            ]}
-            onPress={() => generateWorkout('ml')}
-            disabled={loading}
-          >
-            <Text style={styles.methodIcon}>⚡</Text>
-            <Text style={styles.methodButtonText}>Machine Learning</Text>
-            <Text style={styles.methodDescription}>Fast & Consistent</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[
-              styles.methodButton, 
-              generationMethod === 'ai' && styles.methodButtonActive,
-              loading && styles.buttonDisabled
-            ]}
-            onPress={() => generateWorkout('ai')}
-            disabled={loading}
-          >
-            <Text style={styles.methodIcon}>🤖</Text>
-            <Text style={styles.methodButtonText}>AI Powered</Text>
-            <Text style={styles.methodDescription}>Creative & Detailed</Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity 
+          style={[
+            styles.generateButton,
+            loading && styles.buttonDisabled
+          ]}
+          onPress={generateWorkout}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <>
+              <Text style={styles.generateIcon}>⚡</Text>
+              <Text style={styles.generateButtonText}>Generate ML Workout</Text>
+              <Text style={styles.generateDescription}>Fast & Personalized</Text>
+            </>
+          )}
+        </TouchableOpacity>
 
         <Text style={styles.generationInfo}>
-          {generationMethod === 'ml' 
-            ? 'ML: Instant workout based on fitness rules' 
-            : 'AI: Personalized plan with creative exercises'
-          }
+          Uses machine learning to create workouts based on your age, fitness level, goals, and equipment
         </Text>
       </View>
 
@@ -117,23 +95,28 @@ export default function DashboardScreen({ navigation }) {
             <Text style={styles.workoutTitle}>
               {workoutPlan.workout?.plan_name || workoutPlan.plan_name}
             </Text>
-            <View style={[
-              styles.generationBadge,
-              generationMethod === 'ai' ? styles.aiBadge : styles.mlBadge
-            ]}>
-              <Text style={styles.badgeText}>
-                {generationMethod.toUpperCase()} GENERATED
-              </Text>
+            <View style={styles.generationBadge}>
+              <Text style={styles.badgeText}>ML GENERATED</Text>
             </View>
           </View>
 
-          <Text style={styles.workoutDetail}>Level: {workoutPlan.workout?.fitness_level || workoutPlan.fitness_level}</Text>
-          <Text style={styles.workoutDetail}>Goal: {workoutPlan.workout?.goal || workoutPlan.goal}</Text>
-          <Text style={styles.workoutDetail}>Duration: {workoutPlan.workout?.duration || workoutPlan.duration} minutes</Text>
-          <Text style={styles.workoutDetail}>Days per week: {workoutPlan.workout?.days_per_week || workoutPlan.days_per_week}</Text>
+          <Text style={styles.workoutDetail}>
+            Level: {workoutPlan.workout?.fitness_level || workoutPlan.fitness_level}
+          </Text>
+          <Text style={styles.workoutDetail}>
+            Goal: {workoutPlan.workout?.goal || workoutPlan.goal}
+          </Text>
+          <Text style={styles.workoutDetail}>
+            Duration: {workoutPlan.workout?.duration || workoutPlan.duration} minutes
+          </Text>
+          <Text style={styles.workoutDetail}>
+            Days per week: {workoutPlan.workout?.days_per_week || workoutPlan.days_per_week}
+          </Text>
           
           {workoutPlan.bmi_analysis && (
-            <Text style={styles.workoutDetail}>BMI Analysis: {workoutPlan.bmi_analysis}</Text>
+            <Text style={styles.workoutDetail}>
+              BMI Analysis: {workoutPlan.bmi_analysis}
+            </Text>
           )}
 
           <Text style={styles.exercisesTitle}>Exercises:</Text>
@@ -141,16 +124,19 @@ export default function DashboardScreen({ navigation }) {
             <Text key={index} style={styles.exercise}>• {exercise}</Text>
           ))}
 
-          {/* AI-specific content */}
-          {workoutPlan.progression_tips && workoutPlan.progression_tips.length > 0 && (
+          {/* Workout Structure */}
+          {workoutPlan.workout_structure && workoutPlan.workout_structure.length > 0 && (
             <>
-              <Text style={styles.exercisesTitle}>Progression Tips:</Text>
-              {workoutPlan.progression_tips.map((tip, index) => (
-                <Text key={index} style={styles.exercise}>• {tip}</Text>
+              <Text style={styles.exercisesTitle}>Workout Structure:</Text>
+              {workoutPlan.workout_structure.map((item, index) => (
+                <Text key={index} style={styles.exercise}>
+                  • {item.exercise}: {item.sets} sets × {item.reps} (rest: {item.rest})
+                </Text>
               ))}
             </>
           )}
 
+          {/* Recommendations */}
           {workoutPlan.recommendations && workoutPlan.recommendations.length > 0 && (
             <>
               <Text style={styles.exercisesTitle}>Recommendations:</Text>
@@ -158,6 +144,16 @@ export default function DashboardScreen({ navigation }) {
                 <Text key={index} style={styles.exercise}>• {rec}</Text>
               ))}
             </>
+          )}
+
+          {/* Advantages */}
+          {workoutPlan.advantages && (
+            <View style={styles.advantagesSection}>
+              <Text style={styles.advantagesTitle}>Benefits:</Text>
+              {workoutPlan.advantages.map((advantage, index) => (
+                <Text key={index} style={styles.advantage}>✓ {advantage}</Text>
+              ))}
+            </View>
           )}
         </View>
       )}
@@ -242,42 +238,32 @@ const styles = StyleSheet.create({
   sectionSubtitle: {
     fontSize: 14,
     color: '#666',
-    marginBottom: 15,
+    marginBottom: 20,
+    textAlign: 'center',
   },
-  methodButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 15,
-  },
-  methodButton: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-    padding: 15,
+  generateButton: {
+    backgroundColor: '#007AFF',
+    padding: 20,
     borderRadius: 10,
     alignItems: 'center',
-    marginHorizontal: 5,
-    borderWidth: 2,
-    borderColor: '#dee2e6',
+    marginBottom: 15,
   },
-  methodButtonActive: {
-    borderColor: '#007AFF',
-    backgroundColor: '#e6f2ff',
+  generateIcon: {
+    fontSize: 28,
+    marginBottom: 8,
   },
-  methodIcon: {
-    fontSize: 24,
-    marginBottom: 5,
-  },
-  methodButtonText: {
-    fontSize: 16,
+  generateButtonText: {
+    color: 'white',
+    fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
     textAlign: 'center',
   },
-  methodDescription: {
-    fontSize: 12,
-    color: '#666',
+  generateDescription: {
+    color: 'white',
+    fontSize: 14,
     textAlign: 'center',
     marginTop: 5,
+    opacity: 0.9,
   },
   generationInfo: {
     fontSize: 12,
@@ -309,16 +295,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   generationBadge: {
+    backgroundColor: '#28a745',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
     marginLeft: 10,
-  },
-  mlBadge: {
-    backgroundColor: '#28a745',
-  },
-  aiBadge: {
-    backgroundColor: '#17a2b8',
   },
   badgeText: {
     color: 'white',
@@ -340,6 +321,24 @@ const styles = StyleSheet.create({
   exercise: {
     fontSize: 14,
     color: '#666',
+    marginLeft: 10,
+    marginBottom: 3,
+  },
+  advantagesSection: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  advantagesTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#28a745',
+    marginBottom: 5,
+  },
+  advantage: {
+    fontSize: 14,
+    color: '#28a745',
     marginLeft: 10,
     marginBottom: 3,
   },

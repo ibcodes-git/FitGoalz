@@ -1,25 +1,17 @@
-# backend/app/routers/workouts.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User, UserProfile
 from app.ml.workout_generator import workout_generator
-from app.ml.ai_workout_generator import ai_workout_generator
-from app.routers.auth import get_current_user
-from app.ml.unified_workout_generator import unified_generator
-import requests
 
 router = APIRouter()
 
-@router.post("/generate-personalized")
-async def generate_personalized_workout(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Generate personalized workout based on user profile"""
+@router.post("/generate-workout")
+async def generate_workout(db: Session = Depends(get_db)):
+    """Generate personalized workout using ML"""
     
-    # Get user profile
-    user_profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+    # For testing, get the first user profile available
+    user_profile = db.query(UserProfile).first()
     
     if not user_profile:
         raise HTTPException(
@@ -41,14 +33,18 @@ async def generate_personalized_workout(
         "equipment": user_profile.equipment
     }
     
-    # Generate personalized workout
+    # Generate personalized workout using ML
     workout_plan = workout_generator.generate_workout_plan(profile_data)
     
-    return workout_plan
+    return {
+        "workout": workout_plan,
+        "generation_method": "ML",
+        "advantages": ["Fast generation", "Always available", "Consistent results"]
+    }
 
 @router.post("/generate-basic")
 async def generate_basic_workout():
-    """Generate basic workout (existing functionality)"""
+    """Generate basic workout (fallback option)"""
     basic_plan = {
         "plan_name": "Basic Full Body Workout",
         "fitness_level": "beginner",
@@ -69,7 +65,7 @@ async def generate_basic_workout():
     return basic_plan
 
 @router.get("/plans")
-async def get_workout_plans(current_user: User = Depends(get_current_user)):
+async def get_workout_plans():
     """Get available workout plans"""
     return {
         "plans": [
@@ -82,126 +78,3 @@ async def get_workout_plans(current_user: User = Depends(get_current_user)):
 @router.get("/test")
 async def test_workouts():
     return {"message": "Workouts router is working!"}
-
-@router.post("/generate-workout")
-async def generate_workout(
-    workout_request: dict,  # Now accepts parameters
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Generate workout with choice of ML or AI"""
-    
-    user_profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
-    if not user_profile:
-        raise HTTPException(status_code=400, detail="Please complete your fitness profile first")
-    
-    profile_data = {
-        "age": user_profile.age,
-        "weight": user_profile.weight,
-        "height": user_profile.height,
-        "gender": user_profile.gender,
-        "fitness_level": user_profile.fitness_level,
-        "goals": user_profile.goals,
-        "workout_days": user_profile.workout_days,
-        "workout_duration": user_profile.workout_duration,
-        "injuries": user_profile.injuries,
-        "equipment": user_profile.equipment
-    }
-    
-    use_ai = workout_request.get('use_ai', False)
-    workout = unified_generator.generate_workout(profile_data, use_ai=use_ai)
-    
-    return {
-        "workout": workout,
-        "generation_method": "AI" if use_ai else "ML",
-        "user_preferences": workout_request
-    }
-
-@router.post("/generate-ml-workout")
-async def generate_ml_workout(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Generate workout using Machine Learning only"""
-    user_profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
-    if not user_profile:
-        raise HTTPException(status_code=400, detail="Please complete your fitness profile first")
-    
-    profile_data = {
-        "age": user_profile.age,
-        "weight": user_profile.weight,
-        "height": user_profile.height,
-        "gender": user_profile.gender,
-        "fitness_level": user_profile.fitness_level,
-        "goals": user_profile.goals,
-        "workout_days": user_profile.workout_days,
-        "workout_duration": user_profile.workout_duration,
-        "injuries": user_profile.injuries,
-        "equipment": user_profile.equipment
-    }
-    
-    workout = unified_generator.ml_generator.generate_workout_plan(profile_data)
-    
-    return {
-        "workout": workout,
-        "generation_method": "ML",
-        "advantages": ["Fast generation", "Always available", "Consistent results"]
-    }
-
-@router.post("/generate-ai-workout")
-async def generate_ai_workout(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Generate workout using AI only"""
-    user_profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
-    if not user_profile:
-        raise HTTPException(status_code=400, detail="Please complete your fitness profile first")
-    
-    profile_data = {
-        "age": user_profile.age,
-        "weight": user_profile.weight,
-        "height": user_profile.height,
-        "gender": user_profile.gender,
-        "fitness_level": user_profile.fitness_level,
-        "goals": user_profile.goals,
-        "workout_days": user_profile.workout_days,
-        "workout_duration": user_profile.workout_duration,
-        "injuries": user_profile.injuries,
-        "equipment": user_profile.equipment
-    }
-    
-    workout = unified_generator.ai_generator.generate_ai_workout(profile_data)
-    
-    return {
-        "workout": workout,
-        "generation_method": "AI",
-        "advantages": ["Highly personalized", "Creative exercises", "Detailed instructions"]
-    }
-
-@router.post("/compare-workouts")
-async def compare_workouts(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Compare ML vs AI generated workouts"""
-    user_profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
-    if not user_profile:
-        raise HTTPException(status_code=400, detail="Please complete your fitness profile first")
-    
-    profile_data = {
-        "age": user_profile.age,
-        "weight": user_profile.weight,
-        "height": user_profile.height,
-        "gender": user_profile.gender,
-        "fitness_level": user_profile.fitness_level,
-        "goals": user_profile.goals,
-        "workout_days": user_profile.workout_days,
-        "workout_duration": user_profile.workout_duration,
-        "injuries": user_profile.injuries,
-        "equipment": user_profile.equipment
-    }
-    
-    comparison = unified_generator.compare_workouts(profile_data)
-    
-    return comparison

@@ -1,9 +1,7 @@
-# backend/app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine
 from app import models
-from app.routers import profile
 
 app = FastAPI(title="FitGoalz API", version="1.0.0")
 
@@ -22,55 +20,36 @@ async def startup_event():
     models.Base.metadata.create_all(bind=engine)
     print("✅ Database tables created")
 
-# Add this right before your router imports
-print("🔍 DEBUG: Checking workouts router...")
+def load_router(router_name):
+    """Helper function to load routers with error handling"""
+    try:
+        if router_name == "auth":
+            from app.routers import auth
+            app.include_router(auth.router, prefix="/api")
+        elif router_name == "workouts":
+            from app.routers import workouts
+            app.include_router(workouts.router, prefix="/api", tags=["workouts"])
+        elif router_name == "feedback":
+            from app.routers import feedback
+            app.include_router(feedback.router, prefix="/api")
+        elif router_name == "profile":
+            from app.routers import profile
+            app.include_router(profile.router, prefix="/api")
+        
+        print(f"✅ {router_name} router loaded successfully")
+        return True
+    except Exception as e:
+        print(f"❌ Failed to load {router_name} router: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
-try:
-    from app.routers import workouts
-    print("✅ Workouts module imported successfully")
-    
-    # Check if the new endpoints exist
-    print("🔍 DEBUG: Workouts router routes:")
-    for route in workouts.router.routes:
-        if hasattr(route, 'methods') and hasattr(route, 'path'):
-            print(f"  {route.methods} {route.path}")
-    
-    app.include_router(workouts.router, prefix="/api", tags=["workouts"])
-    print("✅ Workouts router loaded successfully")
-    
-except Exception as e:
-    print(f"❌ Failed to load workouts router: {e}")
-    import traceback
-    traceback.print_exc()
+# Load all routers in order
+print("🔍 Loading routers...")
+routers = ["auth", "workouts", "feedback", "profile"]
 
-# Import routers
-try:
-    from app.routers import auth
-    app.include_router(auth.router, prefix="/api")
-    print("✅ Auth router loaded successfully")
-except Exception as e:
-    print(f"❌ Failed to load auth router: {e}")
-
-try:
-    from app.routers import workouts
-    app.include_router(workouts.router, prefix="/api")
-    print("✅ Workouts router loaded successfully")
-except Exception as e:
-    print(f"❌ Failed to load workouts router: {e}")
-
-try:
-    from app.routers import feedback
-    app.include_router(feedback.router, prefix="/api")
-    print("✅ Feedback router loaded successfully")
-except Exception as e:
-    print(f"❌ Failed to load feedback router: {e}")
-
-try:
-    from app.routers import profile
-    app.include_router(profile.router, prefix="/api")  # This will create /api/fitness-profile etc.
-    print("✅ Profile router loaded successfully")
-except Exception as e:
-    print(f"❌ Failed to load profile router: {e}")
+for router in routers:
+    load_router(router)
 
 @app.get("/")
 async def root():
