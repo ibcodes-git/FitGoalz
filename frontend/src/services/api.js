@@ -103,3 +103,21 @@ export const userAPI = {
   getProfile: () => api.get('/api/fitness-profile'),
   updateProfile: (userData) => api.post('/api/fitness-profile', userData),
 };
+
+// Enhanced Feedback API calls
+export const feedbackAPI = {
+  // Enhanced: Log workout and get feedback in one call
+  logWorkout: (workoutData) => api.post('/api/log-workout', workoutData),
+  
+  // Legacy endpoint (maintained)
+  submitWorkoutFeedback: (feedbackData) => api.post('/api/workout-feedback', feedbackData),
+  
+  // Get enhanced workout history
+  getMyWorkouts: () => api.get('/api/my-workouts'),
+  
+  // Get progress analytics
+  getProgressAnalytics: () => api.get('/api/progress-analytics'),
+  
+  // Get detailed workout info
+  getWorkoutDetails: (workoutId) => api.get(`/api/workout-details/${workoutId}`),
+};

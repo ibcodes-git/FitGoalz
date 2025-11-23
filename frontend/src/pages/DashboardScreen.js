@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
-import { authAPI, workoutsAPI } from '../services/api';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, TextInput } from 'react-native';
+import { authAPI, workoutsAPI, feedbackAPI } from '../services/api'; // Added feedbackAPI import
 
 export default function DashboardScreen({ navigation }) {
   const [user, setUser] = useState(null);
   const [workoutPlan, setWorkoutPlan] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [loggingWorkout, setLoggingWorkout] = useState(false);
+  const [workoutNotes, setWorkoutNotes] = useState('');
+  const [difficultyRating, setDifficultyRating] = useState(3);
+  const [energyLevel, setEnergyLevel] = useState(3);
 
   useEffect(() => {
     fetchUserProfile();
@@ -21,19 +25,104 @@ export default function DashboardScreen({ navigation }) {
   };
 
   const generateWorkout = async () => {
-  setLoading(true);
-  
-  try {
-    const response = await workoutsAPI.generateWorkout(); // This calls the ML endpoint
-    setWorkoutPlan(response.data);
-    Alert.alert('Success', 'Personalized workout generated!');
-  } catch (error) {
-    Alert.alert('Error', 'Failed to generate workout. Please complete your fitness profile first.');
-    console.error('Workout error:', error);
-  } finally {
-    setLoading(false);
-  }
-};
+    setLoading(true);
+    try {
+      const response = await workoutsAPI.generateWorkout();
+      setWorkoutPlan(response.data);
+      Alert.alert('Success', 'Personalized workout generated!');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to generate workout. Please complete your fitness profile first.');
+      console.error('Workout error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Enhanced workout logging function
+  const logCurrentWorkout = async () => {
+    if (!workoutPlan) {
+      Alert.alert('Error', 'Please generate a workout first');
+      return;
+    }
+
+    setLoggingWorkout(true);
+    try {
+      const workoutData = {
+        workout_name: workoutPlan.workout?.plan_name || workoutPlan.plan_name || "Generated Workout",
+        workout_type: "ml_generated",
+        duration_minutes: workoutPlan.workout?.duration || workoutPlan.duration || 30,
+        difficulty_rating: difficultyRating,
+        energy_level: energyLevel,
+        personal_notes: workoutNotes,
+        workout_plan: workoutPlan.workout || workoutPlan,
+        completion_data: {
+          completed_exercises: workoutPlan.workout?.exercises?.length || workoutPlan.exercises?.length || 0,
+          total_exercises: workoutPlan.workout?.exercises?.length || workoutPlan.exercises?.length || 0
+        },
+        exercises_logged: (workoutPlan.workout?.exercises || workoutPlan.exercises || []).map(exercise => ({
+          name: exercise,
+          sets_completed: 3,
+          reps_completed: "8-12",
+          weight_used: null,
+          notes: ""
+        }))
+      };
+
+      const response = await feedbackAPI.logWorkout(workoutData);
+      
+      // Show AI feedback to user
+      Alert.alert(
+        'Workout Logged Successfully!', 
+        `AI Feedback: ${response.data.feedback.feedback_text}\n\nRating: ${response.data.feedback.rating}/5`
+      );
+      
+      // Reset form
+      setWorkoutNotes('');
+      setDifficultyRating(3);
+      setEnergyLevel(3);
+      
+    } catch (error) {
+      Alert.alert('Error', 'Failed to log workout');
+      console.error('Log workout error:', error);
+    } finally {
+      setLoggingWorkout(false);
+    }
+  };
+
+  // Quick log function (no user input needed)
+  const quickLogWorkout = async () => {
+    if (!workoutPlan) {
+      Alert.alert('Error', 'Please generate a workout first');
+      return;
+    }
+
+    setLoggingWorkout(true);
+    try {
+      const workoutData = {
+        workout_name: workoutPlan.workout?.plan_name || workoutPlan.plan_name || "Quick Workout",
+        workout_type: "ml_generated",
+        duration_minutes: workoutPlan.workout?.duration || workoutPlan.duration || 30,
+        difficulty_rating: 3,
+        energy_level: 3,
+        personal_notes: "Quick log - completed workout",
+        workout_plan: workoutPlan.workout || workoutPlan,
+        completion_data: {
+          completed_exercises: workoutPlan.workout?.exercises?.length || workoutPlan.exercises?.length || 0,
+          total_exercises: workoutPlan.workout?.exercises?.length || workoutPlan.exercises?.length || 0
+        }
+      };
+
+      const response = await feedbackAPI.logWorkout(workoutData);
+      Alert.alert('Success', 'Workout logged quickly!');
+      
+    } catch (error) {
+      Alert.alert('Error', 'Failed to log workout');
+      console.error('Quick log error:', error);
+    } finally {
+      setLoggingWorkout(false);
+    }
+  };
+
   const handleLogout = async () => {
     try {
       await authAPI.logout();
@@ -43,6 +132,31 @@ export default function DashboardScreen({ navigation }) {
       Alert.alert('Error', 'Logout failed');
     }
   };
+
+  const RatingSelector = ({ title, value, onValueChange }) => (
+    <View style={styles.ratingSection}>
+      <Text style={styles.ratingTitle}>{title}</Text>
+      <View style={styles.ratingContainer}>
+        {[1, 2, 3, 4, 5].map((rating) => (
+          <TouchableOpacity
+            key={rating}
+            style={[
+              styles.ratingButton,
+              value === rating && styles.ratingButtonSelected
+            ]}
+            onPress={() => onValueChange(rating)}
+          >
+            <Text style={[
+              styles.ratingText,
+              value === rating && styles.ratingTextSelected
+            ]}>
+              {rating}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
 
   return (
     <ScrollView style={styles.container}>
@@ -124,37 +238,56 @@ export default function DashboardScreen({ navigation }) {
             <Text key={index} style={styles.exercise}>• {exercise}</Text>
           ))}
 
-          {/* Workout Structure */}
-          {workoutPlan.workout_structure && workoutPlan.workout_structure.length > 0 && (
-            <>
-              <Text style={styles.exercisesTitle}>Workout Structure:</Text>
-              {workoutPlan.workout_structure.map((item, index) => (
-                <Text key={index} style={styles.exercise}>
-                  • {item.exercise}: {item.sets} sets × {item.reps} (rest: {item.rest})
-                </Text>
-              ))}
-            </>
-          )}
-
-          {/* Recommendations */}
-          {workoutPlan.recommendations && workoutPlan.recommendations.length > 0 && (
-            <>
-              <Text style={styles.exercisesTitle}>Recommendations:</Text>
-              {workoutPlan.recommendations.map((rec, index) => (
-                <Text key={index} style={styles.exercise}>• {rec}</Text>
-              ))}
-            </>
-          )}
-
-          {/* Advantages */}
-          {workoutPlan.advantages && (
-            <View style={styles.advantagesSection}>
-              <Text style={styles.advantagesTitle}>Benefits:</Text>
-              {workoutPlan.advantages.map((advantage, index) => (
-                <Text key={index} style={styles.advantage}>✓ {advantage}</Text>
-              ))}
+          {/* Workout Logging Section - Only show when workout is generated */}
+          <View style={styles.loggingSection}>
+            <Text style={styles.loggingTitle}>Log This Workout</Text>
+            
+            <RatingSelector 
+              title="How difficult was this workout?"
+              value={difficultyRating}
+              onValueChange={setDifficultyRating}
+            />
+            
+            <RatingSelector 
+              title="How was your energy level?"
+              value={energyLevel}
+              onValueChange={setEnergyLevel}
+            />
+            
+            <View style={styles.notesSection}>
+              <Text style={styles.notesTitle}>Workout Notes (Optional)</Text>
+              <TextInput
+                style={styles.notesInput}
+                value={workoutNotes}
+                onChangeText={setWorkoutNotes}
+                placeholder="How did you feel? Any observations?"
+                multiline
+                numberOfLines={3}
+              />
             </View>
-          )}
+
+            <View style={styles.loggingButtons}>
+              <TouchableOpacity 
+                style={[styles.quickLogButton, loggingWorkout && styles.buttonDisabled]}
+                onPress={quickLogWorkout}
+                disabled={loggingWorkout}
+              >
+                <Text style={styles.quickLogButtonText}>
+                  {loggingWorkout ? 'Logging...' : 'Quick Log'}
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.detailedLogButton, loggingWorkout && styles.buttonDisabled]}
+                onPress={logCurrentWorkout}
+                disabled={loggingWorkout}
+              >
+                <Text style={styles.detailedLogButtonText}>
+                  {loggingWorkout ? 'Logging...' : 'Log with Details'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       )}
 
@@ -171,7 +304,7 @@ export default function DashboardScreen({ navigation }) {
           style={styles.secondaryButton}
           onPress={() => navigation.navigate('WorkoutHistory')}
         >
-          <Text style={styles.secondaryButtonText}>Workout History</Text>
+          <Text style={styles.secondaryButtonText}>View Workout History</Text>
         </TouchableOpacity>
       </View>
 
@@ -324,23 +457,103 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     marginBottom: 3,
   },
-  advantagesSection: {
-    marginTop: 10,
-    paddingTop: 10,
+  // New styles for workout logging
+  loggingSection: {
+    marginTop: 20,
+    paddingTop: 20,
     borderTopWidth: 1,
     borderTopColor: '#eee',
   },
-  advantagesTitle: {
-    fontSize: 16,
+  loggingTitle: {
+    fontSize: 18,
     fontWeight: 'bold',
-    color: '#28a745',
-    marginBottom: 5,
+    marginBottom: 15,
+    color: '#333',
+    textAlign: 'center',
   },
-  advantage: {
+  ratingSection: {
+    marginBottom: 15,
+  },
+  ratingTitle: {
     fontSize: 14,
-    color: '#28a745',
-    marginLeft: 10,
-    marginBottom: 3,
+    fontWeight: '600',
+    marginBottom: 8,
+    color: '#333',
+  },
+  ratingContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  ratingButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  ratingButtonSelected: {
+    backgroundColor: '#007AFF',
+    borderColor: '#0056CC',
+  },
+  ratingText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#666',
+  },
+  ratingTextSelected: {
+    color: 'white',
+  },
+  notesSection: {
+    marginBottom: 15,
+  },
+  notesTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+    color: '#333',
+  },
+  notesInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    backgroundColor: 'white',
+    textAlignVertical: 'top',
+    minHeight: 80,
+  },
+  loggingButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  quickLogButton: {
+    flex: 1,
+    backgroundColor: '#6c757d',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginRight: 5,
+  },
+  quickLogButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  detailedLogButton: {
+    flex: 1,
+    backgroundColor: '#28a745',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginLeft: 5,
+  },
+  detailedLogButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   actionSection: {
     marginBottom: 20,

@@ -5,6 +5,8 @@ import LoginScreen from './src/pages/LoginScreen';
 import RegisterScreen from './src/pages/RegisterScreen';
 import DashboardScreen from './src/pages/DashboardScreen';
 import FitnessProfileScreen from './src/pages/FitnessProfileScreen';
+import { StackScreen } from 'react-native-screens';
+import WorkoutHistoryScreen from './src/pages/WorkoutHistoryScreen';
 
 const Stack = createStackNavigator();
 
@@ -15,6 +17,7 @@ export default function App() {
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Register" component={RegisterScreen} />
         <Stack.Screen name="Dashboard" component={DashboardScreen} />
+        <Stack.Screen name="WorkoutHistory" component={WorkoutHistoryScreen} />
         <Stack.Screen 
           name="FitnessProfile" 
           component={FitnessProfileScreen}

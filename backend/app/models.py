@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, Float, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, Float, ForeignKey, JSON
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship  
 from sqlalchemy.sql import func
 
 Base = declarative_base()
@@ -12,6 +13,9 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationships
+    workout_feedbacks = relationship("WorkoutFeedback", back_populates="user")
 
 class UserProfile(Base):
     __tablename__ = "user_profiles"
@@ -19,7 +23,7 @@ class UserProfile(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey('users.id'))
 
-    #Personal details
+    # Personal details
     age = Column(Integer)
     weight = Column(Float)  # in kg
     height = Column(Float)  # in cm
@@ -44,8 +48,8 @@ class Workout(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     description = Column(Text)
-    difficulty = Column(String, nullable=False) #beginner,intermediate,advanced
-    duration = Column(DateTime(timezone=True), server_default=func.now())
+    difficulty = Column(String, nullable=False) # beginner, intermediate, advanced
+    duration = Column(Integer)  # minutes
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class UserProgress(Base):
@@ -56,5 +60,31 @@ class UserProgress(Base):
     workout_id = Column(Integer, ForeignKey('workouts.id'))
     completed = Column(Boolean, default=False)
     notes = Column(Text)
-    created_at = Column(DateTime(timezone=True), server_default= func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+class WorkoutFeedback(Base):
+    __tablename__ = "workout_feedback"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    
+    # Workout plan and completion data
+    workout_plan = Column(JSON)
+    completion_data = Column(JSON)
+    
+    # Enhanced workout logging fields
+    workout_name = Column(String, default="Workout Session")
+    workout_type = Column(String, default="ml_generated")  # ml_generated, custom, basic
+    duration_minutes = Column(Integer, default=30)
+    difficulty_rating = Column(Integer)  # 1-5 scale
+    energy_level = Column(Integer)  # 1-5 scale
+    exercises_logged = Column(JSON)  # Detailed exercise logging
+    personal_notes = Column(Text)
+    
+    # Feedback fields
+    feedback_text = Column(Text)
+    rating = Column(Integer)  # 1-5 scale
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationship
+    user = relationship("User", back_populates="workout_feedbacks")
