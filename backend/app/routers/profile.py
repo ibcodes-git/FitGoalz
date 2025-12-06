@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from datetime import datetime
 from app.database import get_db
 from app.models import User, UserProfile
 from app.routers.auth import get_current_user
@@ -15,25 +16,62 @@ async def create_fitness_profile(
 ):
     """Create or update user fitness profile"""
     
-    # Check if profile already exists
-    existing_profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+    print(f"🔍 DEBUG: Received profile data: {profile_data}")
+    print(f"🔍 DEBUG: Current user ID: {current_user.id}")
     
-    if existing_profile:
-        # Update existing profile
-        for key, value in profile_data.items():
-            if hasattr(existing_profile, key):
-                setattr(existing_profile, key, value)
-        db.commit()
-        db.refresh(existing_profile)
-        return {"message": "Fitness profile updated successfully", "profile": existing_profile}
-    else:
-        # Create new profile
-        profile_data['user_id'] = current_user.id
-        new_profile = UserProfile(**profile_data)
-        db.add(new_profile)
-        db.commit()
-        db.refresh(new_profile)
-        return {"message": "Fitness profile created successfully", "profile": new_profile}
+    try:
+        # Check if profile already exists
+        existing_profile = db.query(UserProfile).filter(
+            UserProfile.user_id == current_user.id
+        ).first()
+        
+        if existing_profile:
+            print("🔍 DEBUG: Updating existing profile...")
+            # Update existing profile
+            for key, value in profile_data.items():
+                if hasattr(existing_profile, key):
+                    setattr(existing_profile, key, value)
+            
+            # CRITICAL FIX: Manually set updated_at with datetime object
+            existing_profile.updated_at = datetime.utcnow()
+            
+            db.commit()
+            db.refresh(existing_profile)
+            
+            print("✅ DEBUG: Profile updated successfully")
+            return {
+                "message": "Fitness profile updated successfully", 
+                "profile": existing_profile
+            }
+        else:
+            print("🔍 DEBUG: Creating new profile...")
+            # Create new profile
+            profile_data['user_id'] = current_user.id
+            
+            # CRITICAL FIX: Set timestamps as datetime objects
+            profile_data['created_at'] = datetime.utcnow()
+            profile_data['updated_at'] = datetime.utcnow()
+            
+            new_profile = UserProfile(**profile_data)
+            db.add(new_profile)
+            db.commit()
+            db.refresh(new_profile)
+            
+            print("✅ DEBUG: Profile created successfully")
+            return {
+                "message": "Fitness profile created successfully", 
+                "profile": new_profile
+            }
+            
+    except Exception as e:
+        db.rollback()
+        print(f"❌ ERROR in create_fitness_profile: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to save profile: {str(e)}"
+        )
 
 @router.get("/fitness-profile")
 async def get_fitness_profile(
@@ -41,7 +79,9 @@ async def get_fitness_profile(
     db: Session = Depends(get_db)
 ):
     """Get user fitness profile"""
-    profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+    profile = db.query(UserProfile).filter(
+        UserProfile.user_id == current_user.id
+    ).first()
     
     if not profile:
         raise HTTPException(status_code=404, detail="Fitness profile not found")
@@ -72,7 +112,9 @@ async def get_fitness_stats(
     print("🔍 DEBUG: Starting fitness-stats endpoint...")
     
     try:
-        profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+        profile = db.query(UserProfile).filter(
+            UserProfile.user_id == current_user.id
+        ).first()
         print(f"🔍 DEBUG: Profile found: {profile is not None}")
         
         if not profile:

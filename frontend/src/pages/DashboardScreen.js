@@ -14,23 +14,31 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialIcons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
-import { authAPI, workoutsAPI, feedbackAPI } from '../services/api';
+import { authAPI, workoutsAPI, feedbackAPI, userAPI } from '../services/api';
 
 const { width, height } = Dimensions.get('window');
 
 export default function DashboardScreen({ navigation }) {
   const [user, setUser] = useState(null);
+  const [fitnessProfile, setFitnessProfile] = useState(null);
   const [workoutPlan, setWorkoutPlan] = useState(null);
+  const [workoutHistory, setWorkoutHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loggingWorkout, setLoggingWorkout] = useState(false);
-  const [workoutNotes, setWorkoutNotes] = useState('');
-  const [difficultyRating, setDifficultyRating] = useState(3);
-  const [energyLevel, setEnergyLevel] = useState(3);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [selectedWorkout, setSelectedWorkout] = useState(null);
   const [activeTab, setActiveTab] = useState('home');
 
   useEffect(() => {
     fetchUserProfile();
+    fetchFitnessProfile();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'history') {
+      fetchWorkoutHistory();
+    }
+  }, [activeTab]);
 
   const fetchUserProfile = async () => {
     try {
@@ -41,59 +49,42 @@ export default function DashboardScreen({ navigation }) {
     }
   };
 
+  const fetchFitnessProfile = async () => {
+    try {
+      const response = await userAPI.getProfile();
+      if (response.data) {
+        setFitnessProfile(response.data);
+      }
+    } catch (error) {
+      console.log('No fitness profile found');
+    }
+  };
+
+  const fetchWorkoutHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const response = await feedbackAPI.getMyWorkouts();
+      const workouts = response.data.workouts || [];
+      setWorkoutHistory(workouts);
+    } catch (error) {
+      console.error('Error fetching workout history:', error);
+      setWorkoutHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   const generateWorkout = async () => {
     setLoading(true);
     try {
       const response = await workoutsAPI.generateWorkout();
       setWorkoutPlan(response.data);
       Alert.alert('Success', 'Personalized workout generated!');
-      setActiveTab('workout');
     } catch (error) {
       Alert.alert('Error', 'Failed to generate workout. Please complete your fitness profile first.');
       console.error('Workout error:', error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const logCurrentWorkout = async () => {
-    if (!workoutPlan) {
-      Alert.alert('Error', 'Please generate a workout first');
-      return;
-    }
-
-    setLoggingWorkout(true);
-    try {
-      const workoutData = {
-        workout_name: workoutPlan.workout?.plan_name || workoutPlan.plan_name || "Generated Workout",
-        workout_type: "ml_generated",
-        duration_minutes: workoutPlan.workout?.duration || workoutPlan.duration || 30,
-        difficulty_rating: difficultyRating,
-        energy_level: energyLevel,
-        personal_notes: workoutNotes,
-        workout_plan: workoutPlan.workout || workoutPlan,
-        completion_data: {
-          completed_exercises: workoutPlan.workout?.exercises?.length || workoutPlan.exercises?.length || 0,
-          total_exercises: workoutPlan.workout?.exercises?.length || workoutPlan.exercises?.length || 0
-        }
-      };
-
-      const response = await feedbackAPI.logWorkout(workoutData);
-      
-      Alert.alert(
-        '🏆 Workout Logged!', 
-        `AI Feedback: ${response.data.feedback.feedback_text}\n\nRating: ${response.data.feedback.rating}/5`
-      );
-      
-      setWorkoutNotes('');
-      setDifficultyRating(3);
-      setEnergyLevel(3);
-      
-    } catch (error) {
-      Alert.alert('Error', 'Failed to log workout');
-      console.error('Log workout error:', error);
-    } finally {
-      setLoggingWorkout(false);
     }
   };
 
@@ -119,8 +110,11 @@ export default function DashboardScreen({ navigation }) {
         }
       };
 
-      await feedbackAPI.logWorkout(workoutData);
-      Alert.alert('✅ Success', 'Workout logged quickly!');
+      const response = await feedbackAPI.logWorkout(workoutData);
+      Alert.alert(
+        '✅ Workout Logged!', 
+        `AI Feedback: ${response.data.feedback.feedback_text}\n\nRating: ${response.data.feedback.rating}/5`
+      );
       
     } catch (error) {
       Alert.alert('Error', 'Failed to log workout');
@@ -152,34 +146,29 @@ export default function DashboardScreen({ navigation }) {
     );
   };
 
-  // Rating Component
-  const RatingSelector = ({ title, value, onValueChange, icon }) => (
-    <View style={styles.ratingSection}>
-      <View style={styles.ratingHeader}>
-        {icon}
-        <Text style={styles.ratingTitle}>{title}</Text>
-      </View>
-      <View style={styles.ratingContainer}>
-        {[1, 2, 3, 4, 5].map((rating) => (
-          <TouchableOpacity
-            key={rating}
-            style={[
-              styles.ratingButton,
-              value === rating && styles.ratingButtonSelected
-            ]}
-            onPress={() => onValueChange(rating)}
-          >
-            <Text style={[
-              styles.ratingText,
-              value === rating && styles.ratingTextSelected
-            ]}>
-              {rating}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-    </View>
-  );
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  };
+
+  const getRatingColor = (rating) => {
+    if (rating >= 4) return '#4CAF50';
+    if (rating >= 3) return '#FF9800';
+    return '#F44336';
+  };
+
+  const calculateBMI = () => {
+    if (fitnessProfile?.weight && fitnessProfile?.height) {
+      const heightInMeters = fitnessProfile.height / 100;
+      const bmi = fitnessProfile.weight / (heightInMeters * heightInMeters);
+      return bmi.toFixed(1);
+    }
+    return 'N/A';
+  };
 
   // Tab Content Renderer
   const renderTabContent = () => {
@@ -196,111 +185,153 @@ export default function DashboardScreen({ navigation }) {
               contentContainerStyle={styles.tabScrollContent}
               showsVerticalScrollIndicator={false}
             >
-              <View style={styles.welcomeCard}>
+              {/* User Profile Header */}
+              <View style={styles.profileCard}>
                 <LinearGradient
                   colors={['rgba(102, 126, 234, 0.9)', 'rgba(118, 75, 162, 0.9)']}
-                  style={styles.welcomeGradient}
+                  style={styles.profileGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                 >
-                  <Text style={styles.welcomeTitle}>Welcome Back! 👋</Text>
-                  <Text style={styles.welcomeName}>{user?.username || 'Fitness Enthusiast'}</Text>
-                  <Text style={styles.welcomeSubtitle}>Ready for today's workout?</Text>
-                </LinearGradient>
-              </View>
-
-              <View style={styles.statsGrid}>
-                <View style={styles.statCard}>
-                  <LinearGradient
-                    colors={['rgba(79, 172, 254, 0.9)', 'rgba(0, 242, 254, 0.9)']}
-                    style={styles.statGradient}
-                  >
-                    <MaterialIcons name="fitness-center" size={20} color="white" />
-                    <Text style={styles.statNumber}>7</Text>
-                    <Text style={styles.statLabel}>Workouts This Week</Text>
-                  </LinearGradient>
-                </View>
-
-                <View style={styles.statCard}>
-                  <LinearGradient
-                    colors={['rgba(67, 233, 123, 0.9)', 'rgba(56, 249, 215, 0.9)']}
-                    style={styles.statGradient}
-                  >
-                    <Ionicons name="flame" size={20} color="white" />
-                    <Text style={styles.statNumber}>3,450</Text>
-                    <Text style={styles.statLabel}>Calories Burned</Text>
-                  </LinearGradient>
-                </View>
-              </View>
-
-              <TouchableOpacity 
-                style={styles.generateHomeButton}
-                onPress={generateWorkout}
-                disabled={loading}
-              >
-                <LinearGradient
-                  colors={['rgba(250, 112, 154, 0.9)', 'rgba(254, 225, 64, 0.9)']}
-                  style={styles.generateHomeGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                >
-                  <View style={styles.generateHomeContent}>
-                    <Ionicons name="flash" size={26} color="white" />
-                    <View style={styles.generateHomeText}>
-                      <Text style={styles.generateHomeTitle}>Generate Workout</Text>
-                      <Text style={styles.generateHomeSubtitle}>AI-powered personalization</Text>
+                  <View style={styles.profileAvatarContainer}>
+                    <View style={styles.profileAvatar}>
+                      <Text style={styles.profileAvatarText}>
+                        {user?.username?.charAt(0).toUpperCase() || 'U'}
+                      </Text>
                     </View>
-                    {loading ? (
-                      <ActivityIndicator color="white" size="small" />
-                    ) : (
-                      <Ionicons name="chevron-forward" size={20} color="white" />
-                    )}
                   </View>
+                  <Text style={styles.profileName}>{user?.username || 'User'}</Text>
+                  <Text style={styles.profileEmail}>{user?.email || 'user@example.com'}</Text>
                 </LinearGradient>
-              </TouchableOpacity>
+              </View>
 
-              <View style={styles.quickActions}>
-                <Text style={styles.sectionTitle}>Quick Actions</Text>
-                <View style={styles.actionGrid}>
+              {/* Fitness Profile Summary */}
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Fitness Profile</Text>
                   <TouchableOpacity 
-                    style={styles.actionButton}
+                    style={styles.editButton}
                     onPress={() => navigation.navigate('FitnessProfile')}
                   >
-                    <View style={[styles.actionIcon, { backgroundColor: 'rgba(102, 126, 234, 0.9)' }]}>
-                      <Ionicons name="person" size={20} color="white" />
-                    </View>
-                    <Text style={styles.actionText}>Fitness Profile</Text>
+                    <Ionicons name="create-outline" size={18} color="#667eea" />
+                    <Text style={styles.editButtonText}>Edit</Text>
                   </TouchableOpacity>
+                </View>
 
-                  <TouchableOpacity 
-                    style={styles.actionButton}
-                    onPress={() => setActiveTab('history')}
-                  >
-                    <View style={[styles.actionIcon, { backgroundColor: 'rgba(240, 147, 251, 0.9)' }]}>
-                      <MaterialIcons name="history" size={20} color="white" />
+                {fitnessProfile ? (
+                  <View style={styles.fitnessDetailsCard}>
+                    <View style={styles.statsGrid}>
+                      <View style={styles.statItem}>
+                        <Text style={styles.statValue}>{fitnessProfile.age || 'N/A'}</Text>
+                        <Text style={styles.statLabel}>Age</Text>
+                      </View>
+                      <View style={styles.statItem}>
+                        <Text style={styles.statValue}>{fitnessProfile.weight || 'N/A'}</Text>
+                        <Text style={styles.statLabel}>Weight (kg)</Text>
+                      </View>
+                      <View style={styles.statItem}>
+                        <Text style={styles.statValue}>{fitnessProfile.height || 'N/A'}</Text>
+                        <Text style={styles.statLabel}>Height (cm)</Text>
+                      </View>
+                      <View style={styles.statItem}>
+                        <Text style={styles.statValue}>{calculateBMI()}</Text>
+                        <Text style={styles.statLabel}>BMI</Text>
+                      </View>
                     </View>
-                    <Text style={styles.actionText}>History</Text>
-                  </TouchableOpacity>
 
-                  <TouchableOpacity 
-                    style={styles.actionButton}
-                    onPress={() => setActiveTab('workout')}
-                  >
-                    <View style={[styles.actionIcon, { backgroundColor: 'rgba(79, 172, 254, 0.9)' }]}>
-                      <FontAwesome5 name="dumbbell" size={18} color="white" />
+                    <View style={styles.detailsGrid}>
+                      <View style={styles.detailRow}>
+                        <Ionicons name="body" size={16} color="#667eea" />
+                        <Text style={styles.detailLabel}>Gender:</Text>
+                        <Text style={styles.detailValue}>{fitnessProfile.gender || 'N/A'}</Text>
+                      </View>
+                      <View style={styles.detailRow}>
+                        <Ionicons name="fitness" size={16} color="#667eea" />
+                        <Text style={styles.detailLabel}>Level:</Text>
+                        <Text style={styles.detailValue}>{fitnessProfile.fitness_level || 'N/A'}</Text>
+                      </View>
+                      <View style={styles.detailRow}>
+                        <Ionicons name="flag" size={16} color="#667eea" />
+                        <Text style={styles.detailLabel}>Goal:</Text>
+                        <Text style={styles.detailValue}>{fitnessProfile.goals?.replace('_', ' ') || 'N/A'}</Text>
+                      </View>
+                      <View style={styles.detailRow}>
+                        <Ionicons name="calendar" size={16} color="#667eea" />
+                        <Text style={styles.detailLabel}>Days/Week:</Text>
+                        <Text style={styles.detailValue}>{fitnessProfile.workout_days || 'N/A'}</Text>
+                      </View>
+                      <View style={styles.detailRow}>
+                        <Ionicons name="time" size={16} color="#667eea" />
+                        <Text style={styles.detailLabel}>Duration:</Text>
+                        <Text style={styles.detailValue}>{fitnessProfile.workout_duration || 'N/A'} min</Text>
+                      </View>
+                      <View style={styles.detailRow}>
+                        <MaterialCommunityIcons name="dumbbell" size={16} color="#667eea" />
+                        <Text style={styles.detailLabel}>Equipment:</Text>
+                        <Text style={styles.detailValue}>{fitnessProfile.equipment || 'N/A'}</Text>
+                      </View>
                     </View>
-                    <Text style={styles.actionText}>Workouts</Text>
-                  </TouchableOpacity>
 
-                  <TouchableOpacity 
-                    style={styles.actionButton}
-                    onPress={() => setActiveTab('profile')}
-                  >
-                    <View style={[styles.actionIcon, { backgroundColor: 'rgba(67, 233, 123, 0.9)' }]}>
-                      <Ionicons name="settings" size={20} color="white" />
-                    </View>
-                    <Text style={styles.actionText}>Settings</Text>
-                  </TouchableOpacity>
+                    {fitnessProfile.injuries && (
+                      <View style={styles.injuriesSection}>
+                        <Text style={styles.injuriesLabel}>Health Notes:</Text>
+                        <Text style={styles.injuriesText}>{fitnessProfile.injuries}</Text>
+                      </View>
+                    )}
+                  </View>
+                ) : (
+                  <View style={styles.noProfileCard}>
+                    <Ionicons name="information-circle-outline" size={40} color="#667eea" />
+                    <Text style={styles.noProfileTitle}>Complete Your Profile</Text>
+                    <Text style={styles.noProfileText}>
+                      Set up your fitness profile to get personalized workouts
+                    </Text>
+                    <TouchableOpacity 
+                      style={styles.setupButton}
+                      onPress={() => navigation.navigate('FitnessProfile')}
+                    >
+                      <LinearGradient
+                        colors={['rgba(102, 126, 234, 0.9)', 'rgba(118, 75, 162, 0.9)']}
+                        style={styles.setupGradient}
+                      >
+                        <Text style={styles.setupButtonText}>Setup Profile</Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+
+              {/* Quick Stats */}
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Activity Summary</Text>
+                <View style={styles.quickStatsGrid}>
+                  <View style={styles.quickStatCard}>
+                    <LinearGradient
+                      colors={['rgba(79, 172, 254, 0.9)', 'rgba(0, 242, 254, 0.9)']}
+                      style={styles.quickStatGradient}
+                    >
+                      <MaterialIcons name="fitness-center" size={20} color="white" />
+                      <Text style={styles.quickStatNumber}>
+                        {workoutHistory.length}
+                      </Text>
+                      <Text style={styles.quickStatLabel}>Total Workouts</Text>
+                    </LinearGradient>
+                  </View>
+
+                  <View style={styles.quickStatCard}>
+                    <LinearGradient
+                      colors={['rgba(67, 233, 123, 0.9)', 'rgba(56, 249, 215, 0.9)']}
+                      style={styles.quickStatGradient}
+                    >
+                      <Ionicons name="flame" size={20} color="white" />
+                      <Text style={styles.quickStatNumber}>
+                        {workoutHistory.length > 0 ? 
+                          (workoutHistory.reduce((sum, w) => sum + (w.rating || 0), 0) / workoutHistory.length).toFixed(1) 
+                          : '0'}
+                      </Text>
+                      <Text style={styles.quickStatLabel}>Avg Rating</Text>
+                    </LinearGradient>
+                  </View>
                 </View>
               </View>
             </ScrollView>
@@ -378,7 +409,7 @@ export default function DashboardScreen({ navigation }) {
 
                     <Text style={styles.exercisesTitle}>Exercises</Text>
                     <View style={styles.exercisesList}>
-                      {(workoutPlan.workout?.exercises || workoutPlan.exercises || []).slice(0, 4).map((exercise, index) => (
+                      {(workoutPlan.workout?.exercises || workoutPlan.exercises || []).map((exercise, index) => (
                         <View key={index} style={styles.exerciseItem}>
                           <View style={styles.exerciseBullet}>
                             <Text style={styles.exerciseNumber}>{index + 1}</Text>
@@ -386,40 +417,31 @@ export default function DashboardScreen({ navigation }) {
                           <Text style={styles.exerciseText}>{exercise}</Text>
                         </View>
                       ))}
-                      {(workoutPlan.workout?.exercises || workoutPlan.exercises || []).length > 4 && (
-                        <Text style={styles.moreExercisesText}>
-                          +{(workoutPlan.workout?.exercises || workoutPlan.exercises || []).length - 4} more exercises
-                        </Text>
-                      )}
                     </View>
 
-                    {/* Workout Logging Section - Simplified */}
+                    {/* Workout Logging Section */}
                     <View style={styles.loggingSection}>
-                      <Text style={styles.loggingTitle}>Log This Workout</Text>
+                      <Text style={styles.loggingTitle}>Complete This Workout?</Text>
                       
-                      <View style={styles.quickLogButtons}>
-                        <TouchableOpacity 
-                          style={[styles.quickLogButton, loggingWorkout && styles.buttonDisabled]}
-                          onPress={quickLogWorkout}
-                          disabled={loggingWorkout}
+                      <TouchableOpacity 
+                        style={[styles.logWorkoutButton, loggingWorkout && styles.buttonDisabled]}
+                        onPress={quickLogWorkout}
+                        disabled={loggingWorkout}
+                      >
+                        <LinearGradient
+                          colors={['rgba(67, 233, 123, 0.9)', 'rgba(56, 249, 215, 0.9)']}
+                          style={styles.logWorkoutGradient}
                         >
-                          <Ionicons name="checkmark-circle" size={18} color="white" />
-                          <Text style={styles.quickLogButtonText}>
-                            {loggingWorkout ? 'Logging...' : 'Quick Log'}
-                          </Text>
-                        </TouchableOpacity>
-                        
-                        <TouchableOpacity 
-                          style={[styles.detailedLogButton, loggingWorkout && styles.buttonDisabled]}
-                          onPress={logCurrentWorkout}
-                          disabled={loggingWorkout}
-                        >
-                          <Ionicons name="clipboard" size={18} color="white" />
-                          <Text style={styles.detailedLogButtonText}>
-                            {loggingWorkout ? 'Logging...' : 'Detailed Log'}
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
+                          {loggingWorkout ? (
+                            <ActivityIndicator color="white" size="small" />
+                          ) : (
+                            <>
+                              <Ionicons name="checkmark-circle" size={20} color="white" />
+                              <Text style={styles.logWorkoutButtonText}>Log Workout</Text>
+                            </>
+                          )}
+                        </LinearGradient>
+                      </TouchableOpacity>
                     </View>
                   </LinearGradient>
                 </View>
@@ -446,11 +468,108 @@ export default function DashboardScreen({ navigation }) {
                       ) : (
                         <>
                           <Ionicons name="sparkles" size={20} color="white" />
-                          <Text style={styles.generateButtonText}>Generate</Text>
+                          <Text style={styles.generateButtonText}>Generate Workout</Text>
                         </>
                       )}
                     </LinearGradient>
                   </TouchableOpacity>
+                </View>
+              )}
+            </ScrollView>
+          </ImageBackground>
+        );
+
+      case 'history':
+        return (
+          <ImageBackground 
+            source={require('../assets/images/logo.jpg')}
+            style={styles.backgroundImage}
+            resizeMode="cover"
+          >
+            <ScrollView 
+              style={styles.tabScrollView}
+              contentContainerStyle={styles.tabScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={styles.historyHeader}>
+                <Text style={styles.historyTitle}>Workout History</Text>
+                <Text style={styles.historySubtitle}>Track your fitness journey</Text>
+              </View>
+              
+              {historyLoading ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color="#667eea" />
+                  <Text style={styles.loadingText}>Loading history...</Text>
+                </View>
+              ) : workoutHistory.length === 0 ? (
+                <View style={styles.historyPlaceholder}>
+                  <View style={styles.historyIcon}>
+                    <MaterialCommunityIcons name="history" size={60} color="rgba(255, 255, 255, 0.7)" />
+                  </View>
+                  <Text style={styles.historyPlaceholderTitle}>No History Yet</Text>
+                  <Text style={styles.historyPlaceholderText}>
+                    Complete your first workout to see history
+                  </Text>
+                  <TouchableOpacity 
+                    style={styles.startWorkoutButton}
+                    onPress={() => setActiveTab('workout')}
+                  >
+                    <LinearGradient
+                      colors={['rgba(102, 126, 234, 0.9)', 'rgba(118, 75, 162, 0.9)']}
+                      style={styles.startWorkoutGradient}
+                    >
+                      <Text style={styles.startWorkoutButtonText}>Go to Workouts</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.historyList}>
+                  <Text style={styles.historySectionTitle}>
+                    Completed Workouts: {workoutHistory.length}
+                  </Text>
+                  
+                  {workoutHistory.map((workout) => (
+                    <TouchableOpacity 
+                      key={workout.id}
+                      style={styles.historyWorkoutCard}
+                      onPress={() => setSelectedWorkout(selectedWorkout?.id === workout.id ? null : workout)}
+                    >
+                      <View style={styles.historyWorkoutHeader}>
+                        <View style={styles.historyWorkoutInfo}>
+                          <Text style={styles.historyWorkoutDate}>
+                            {formatDate(workout.created_at)}
+                          </Text>
+                          <Text style={styles.historyWorkoutPlan}>
+                            {workout.workout_plan?.plan_name || 'Workout Session'}
+                          </Text>
+                        </View>
+                        <View style={[styles.historyRatingBadge, { backgroundColor: getRatingColor(workout.rating) }]}>
+                          <Text style={styles.historyRatingText}>{workout.rating}/5</Text>
+                        </View>
+                      </View>
+
+                      {selectedWorkout?.id === workout.id && (
+                        <View style={styles.historyWorkoutDetails}>
+                          <Text style={styles.historyFeedbackTitle}>AI Feedback:</Text>
+                          <Text style={styles.historyFeedbackText}>{workout.feedback_text}</Text>
+                          
+                          {workout.workout_plan?.exercises && (
+                            <>
+                              <Text style={styles.historyExercisesTitle}>Exercises:</Text>
+                              {workout.workout_plan.exercises.slice(0, 5).map((exercise, idx) => (
+                                <Text key={idx} style={styles.historyExercise}>• {exercise}</Text>
+                              ))}
+                              {workout.workout_plan.exercises.length > 5 && (
+                                <Text style={styles.historyMoreExercises}>
+                                  +{workout.workout_plan.exercises.length - 5} more exercises
+                                </Text>
+                              )}
+                            </>
+                          )}
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  ))}
                 </View>
               )}
             </ScrollView>
@@ -537,129 +656,93 @@ export default function DashboardScreen({ navigation }) {
           </ImageBackground>
         );
 
-      case 'history':
-        return (
-          <ImageBackground 
-            source={require('../assets/images/logo.jpg')}
-            style={styles.backgroundImage}
-            resizeMode="cover"
-          >
-            <ScrollView 
-              style={styles.tabScrollView}
-              contentContainerStyle={styles.tabScrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              <View style={styles.historyHeader}>
-                <Text style={styles.historyTitle}>Workout History</Text>
-                <Text style={styles.historySubtitle}>Track your fitness journey</Text>
-              </View>
-              
-              <View style={styles.historyPlaceholder}>
-                <View style={styles.historyIcon}>
-                  <MaterialCommunityIcons name="history" size={60} color="rgba(255, 255, 255, 0.7)" />
-                </View>
-                <Text style={styles.historyPlaceholderTitle}>No History Yet</Text>
-                <Text style={styles.historyPlaceholderText}>
-                  Complete your first workout to see history
-                </Text>
-                <TouchableOpacity 
-                  style={styles.startWorkoutButton}
-                  onPress={() => setActiveTab('workout')}
-                >
-                  <LinearGradient
-                    colors={['rgba(102, 126, 234, 0.9)', 'rgba(118, 75, 162, 0.9)']}
-                    style={styles.startWorkoutGradient}
-                  >
-                    <Text style={styles.startWorkoutButtonText}>Go to Workouts</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </ImageBackground>
-        );
-
       default:
         return null;
     }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Main Content */}
-      <View style={styles.mainContent}>
-        {renderTabContent()}
-      </View>
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        {/* Main Content */}
+        <View style={styles.mainContent}>
+          {renderTabContent()}
+        </View>
 
-      {/* Bottom Navigation - Always visible at bottom */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity 
-          style={styles.navItem}
-          onPress={() => setActiveTab('home')}
-        >
-          <Ionicons 
-            name={activeTab === 'home' ? "home" : "home-outline"} 
-            size={22} 
-            color={activeTab === 'home' ? '#667eea' : '#666'} 
-          />
-          <Text style={[
-            styles.navText,
-            activeTab === 'home' && styles.navTextActive
-          ]}>Home</Text>
-        </TouchableOpacity>
+        {/* Bottom Navigation - Fixed at bottom */}
+        <View style={styles.bottomNav}>
+          <TouchableOpacity 
+            style={styles.navItem}
+            onPress={() => setActiveTab('home')}
+          >
+            <Ionicons 
+              name={activeTab === 'home' ? "home" : "home-outline"} 
+              size={24} 
+              color={activeTab === 'home' ? '#667eea' : '#666'} 
+            />
+            <Text style={[
+              styles.navText,
+              activeTab === 'home' && styles.navTextActive
+            ]}>Home</Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.navItem}
-          onPress={() => setActiveTab('workout')}
-        >
-          <Ionicons 
-            name={activeTab === 'workout' ? "barbell" : "barbell-outline"} 
-            size={22} 
-            color={activeTab === 'workout' ? '#667eea' : '#666'} 
-          />
-          <Text style={[
-            styles.navText,
-            activeTab === 'workout' && styles.navTextActive
-          ]}>Workout</Text>
-        </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.navItem}
+            onPress={() => setActiveTab('workout')}
+          >
+            <Ionicons 
+              name={activeTab === 'workout' ? "barbell" : "barbell-outline"} 
+              size={24} 
+              color={activeTab === 'workout' ? '#667eea' : '#666'} 
+            />
+            <Text style={[
+              styles.navText,
+              activeTab === 'workout' && styles.navTextActive
+            ]}>Workout</Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.navItem}
-          onPress={() => setActiveTab('history')}
-        >
-          <MaterialIcons 
-            name={activeTab === 'history' ? "history" : "history"} 
-            size={22} 
-            color={activeTab === 'history' ? '#667eea' : '#666'} 
-          />
-          <Text style={[
-            styles.navText,
-            activeTab === 'history' && styles.navTextActive
-          ]}>History</Text>
-        </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.navItem}
+            onPress={() => setActiveTab('history')}
+          >
+            <MaterialIcons 
+              name="history" 
+              size={24} 
+              color={activeTab === 'history' ? '#667eea' : '#666'} 
+            />
+            <Text style={[
+              styles.navText,
+              activeTab === 'history' && styles.navTextActive
+            ]}>History</Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.navItem}
-          onPress={() => setActiveTab('profile')}
-        >
-          <Ionicons 
-            name={activeTab === 'profile' ? "person" : "person-outline"} 
-            size={22} 
-            color={activeTab === 'profile' ? '#667eea' : '#666'} 
-          />
-          <Text style={[
-            styles.navText,
-            activeTab === 'profile' && styles.navTextActive
-          ]}>Profile</Text>
-        </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.navItem}
+            onPress={() => setActiveTab('profile')}
+          >
+            <Ionicons 
+              name={activeTab === 'profile' ? "person" : "person-outline"} 
+              size={24} 
+              color={activeTab === 'profile' ? '#667eea' : '#666'} 
+            />
+            <Text style={[
+              styles.navText,
+              activeTab === 'profile' && styles.navTextActive
+            ]}>Profile</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  container: {
+    flex: 1,
   },
   mainContent: {
     flex: 1,
@@ -673,11 +756,11 @@ const styles = StyleSheet.create({
   },
   tabScrollContent: {
     padding: 12,
-    paddingBottom: 20, // Extra padding for bottom nav
+    paddingBottom: 80, // Increased padding to accommodate bottom nav
   },
-  // Home Tab Styles
-  welcomeCard: {
-    height: 140,
+  // Home Tab - Profile Styles
+  profileCard: {
+    height: 160,
     borderRadius: 16,
     overflow: 'hidden',
     marginBottom: 15,
@@ -687,34 +770,187 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
-  welcomeGradient: {
+  profileGradient: {
     flex: 1,
     padding: 16,
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  welcomeTitle: {
-    fontSize: 16,
-    color: 'white',
-    opacity: 0.9,
-    marginBottom: 4,
+  profileAvatarContainer: {
+    marginBottom: 8,
   },
-  welcomeName: {
+  profileAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'white',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileAvatarText: {
     fontSize: 24,
+    fontWeight: 'bold',
+    color: '#667eea',
+  },
+  profileName: {
+    fontSize: 20,
     fontWeight: 'bold',
     color: 'white',
     marginBottom: 4,
   },
-  welcomeSubtitle: {
+  profileEmail: {
     fontSize: 12,
     color: 'white',
-    opacity: 0.8,
+    opacity: 0.9,
+  },
+  section: {
+    marginBottom: 20,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: 'white',
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+  editButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  editButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#667eea',
+    marginLeft: 4,
+  },
+  fitnessDetailsCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
   },
   statsGrid: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 15,
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
-  statCard: {
+  statItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  statValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 10,
+    color: '#666',
+    textAlign: 'center',
+  },
+  detailsGrid: {
+    marginBottom: 12,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  detailLabel: {
+    fontSize: 13,
+    color: '#666',
+    marginLeft: 8,
+    width: 90,
+  },
+  detailValue: {
+    fontSize: 13,
+    color: '#333',
+    fontWeight: '600',
+    textTransform: 'capitalize',
+    flex: 1,
+  },
+  injuriesSection: {
+    backgroundColor: '#fff5f5',
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  injuriesLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#ff6b6b',
+    marginBottom: 4,
+  },
+  injuriesText: {
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 18,
+  },
+  noProfileCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 12,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  noProfileTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  noProfileText: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 16,
+    lineHeight: 18,
+  },
+  setupButton: {
+    height: 40,
+    borderRadius: 20,
+    overflow: 'hidden',
+    width: 160,
+  },
+  setupGradient: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  setupButtonText: {
+    color: 'white',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  quickStatsGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  quickStatCard: {
     width: '48%',
     height: 100,
     borderRadius: 12,
@@ -725,103 +961,23 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 6,
   },
-  statGradient: {
+  quickStatGradient: {
     flex: 1,
     padding: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  statNumber: {
+  quickStatNumber: {
     fontSize: 20,
     fontWeight: 'bold',
     color: 'white',
     marginVertical: 4,
   },
-  statLabel: {
+  quickStatLabel: {
     fontSize: 10,
     color: 'white',
     textAlign: 'center',
     opacity: 0.9,
-  },
-  generateHomeButton: {
-    height: 70,
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  generateHomeGradient: {
-    flex: 1,
-    paddingHorizontal: 16,
-    justifyContent: 'center',
-  },
-  generateHomeContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  generateHomeText: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  generateHomeTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: 'white',
-  },
-  generateHomeSubtitle: {
-    fontSize: 11,
-    color: 'white',
-    opacity: 0.9,
-    marginTop: 2,
-  },
-  quickActions: {
-    marginTop: 5,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 12,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  actionGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  actionButton: {
-    width: '48%',
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  actionIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  actionText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#333',
-    textAlign: 'center',
   },
   // Workout Tab Styles
   workoutHeader: {
@@ -960,14 +1116,6 @@ const styles = StyleSheet.create({
     color: '#333',
     flex: 1,
   },
-  moreExercisesText: {
-    fontSize: 12,
-    color: '#666',
-    fontStyle: 'italic',
-    marginLeft: 36,
-    marginTop: 4,
-  },
-  // Logging Section Styles - Simplified
   loggingSection: {
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderRadius: 12,
@@ -975,49 +1123,32 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   loggingTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
     color: '#333',
     marginBottom: 12,
     textAlign: 'center',
   },
-  quickLogButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  logWorkoutButton: {
+    height: 48,
+    borderRadius: 24,
+    overflow: 'hidden',
   },
-  quickLogButton: {
+  logWorkoutGradient: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: '#6c757d',
-    padding: 12,
-    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
   },
-  quickLogButtonText: {
+  logWorkoutButtonText: {
     color: 'white',
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: 'bold',
-    marginLeft: 6,
-  },
-  detailedLogButton: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: '#28a745',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
     marginLeft: 8,
   },
-  detailedLogButtonText: {
-    color: 'white',
-    fontSize: 13,
-    fontWeight: 'bold',
-    marginLeft: 6,
+  buttonDisabled: {
+    opacity: 0.6,
   },
-  // No Workout State
   noWorkoutContainer: {
     justifyContent: 'center',
     alignItems: 'center',
@@ -1054,11 +1185,11 @@ const styles = StyleSheet.create({
     textShadowRadius: 1,
   },
   generateButton: {
-    height: 44,
-    borderRadius: 22,
+    height: 48,
+    borderRadius: 24,
     overflow: 'hidden',
     width: '100%',
-    maxWidth: 200,
+    maxWidth: 220,
   },
   generateGradient: {
     flex: 1,
@@ -1069,12 +1200,183 @@ const styles = StyleSheet.create({
   },
   generateButtonText: {
     color: 'white',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: 'bold',
     marginLeft: 8,
   },
-  buttonDisabled: {
-    opacity: 0.6,
+  // History Tab Styles
+  historyHeader: {
+    marginBottom: 16,
+  },
+  historyTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: 'white',
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+  historySubtitle: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.8)',
+    marginTop: 4,
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 1,
+  },
+  loadingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: 'white',
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 1,
+  },
+  historyPlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 30,
+    minHeight: 300,
+  },
+  historyIcon: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  historyPlaceholderTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 8,
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+  historyPlaceholderText: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.9)',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 18,
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 1,
+  },
+  startWorkoutButton: {
+    height: 44,
+    borderRadius: 22,
+    overflow: 'hidden',
+    width: '100%',
+    maxWidth: 180,
+  },
+  startWorkoutGradient: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  startWorkoutButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  historyList: {
+    marginBottom: 20,
+  },
+  historySectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 12,
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+  historyWorkoutCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  historyWorkoutHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  historyWorkoutInfo: {
+    flex: 1,
+  },
+  historyWorkoutDate: {
+    fontSize: 11,
+    color: '#999',
+    marginBottom: 4,
+  },
+  historyWorkoutPlan: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  historyRatingBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    minWidth: 45,
+    alignItems: 'center',
+  },
+  historyRatingText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  historyWorkoutDetails: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  historyFeedbackTitle: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    marginBottom: 4,
+    color: '#333',
+  },
+  historyFeedbackText: {
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 18,
+    marginBottom: 10,
+  },
+  historyExercisesTitle: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    marginBottom: 6,
+    color: '#333',
+  },
+  historyExercise: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 8,
+    marginBottom: 3,
+  },
+  historyMoreExercises: {
+    fontSize: 11,
+    color: '#999',
+    fontStyle: 'italic',
+    marginLeft: 8,
+    marginTop: 2,
   },
   // Profile Tab Styles
   profileHeader: {
@@ -1093,31 +1395,6 @@ const styles = StyleSheet.create({
     padding: 16,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  profileAvatar: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: 'white',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  profileAvatarText: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#667eea',
-  },
-  profileName: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 4,
-  },
-  profileEmail: {
-    fontSize: 12,
-    color: 'white',
-    opacity: 0.9,
   },
   profileContent: {
     flex: 1,
@@ -1188,101 +1465,37 @@ const styles = StyleSheet.create({
     color: '#ff3b30',
     marginLeft: 8,
   },
-  // History Tab Styles
-  historyHeader: {
-    marginBottom: 16,
-  },
-  historyTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: 'white',
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  historySubtitle: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginTop: 4,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 1,
-  },
-  historyPlaceholder: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 30,
-    minHeight: 300,
-  },
-  historyIcon: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  historyPlaceholderTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 8,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  historyPlaceholderText: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.9)',
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 18,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 1,
-  },
-  startWorkoutButton: {
-    height: 44,
-    borderRadius: 22,
-    overflow: 'hidden',
-    width: '100%',
-    maxWidth: 180,
-  },
-  startWorkoutGradient: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  startWorkoutButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  // Bottom Navigation
+  // Bottom Navigation - Updated Styles
   bottomNav: {
     flexDirection: 'row',
-    height: 60,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingHorizontal: 16,
+    height: 65,
+    backgroundColor: 'rgba(255, 255, 255, 0.98)',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 8,
+    paddingBottom: 10,
+    paddingTop: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 10,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 1000,
   },
   navItem: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 6,
+    paddingVertical: 4,
   },
   navText: {
-    fontSize: 10,
+    fontSize: 11,
     color: '#666',
-    marginTop: 3,
+    marginTop: 4,
     fontWeight: '500',
   },
   navTextActive: {

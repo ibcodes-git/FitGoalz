@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, Float, 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship  
 from sqlalchemy.sql import func
+from datetime import datetime
 
 Base = declarative_base()
 
@@ -16,12 +17,13 @@ class User(Base):
     
     # Relationships
     workout_feedbacks = relationship("WorkoutFeedback", back_populates="user")
+    profile = relationship("UserProfile", back_populates="user", uselist=False)
 
 class UserProfile(Base):
     __tablename__ = "user_profiles"
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey('users.id'))
+    user_id = Column(Integer, ForeignKey('users.id'), unique=True)
 
     # Personal details
     age = Column(Integer)
@@ -39,8 +41,12 @@ class UserProfile(Base):
     injuries = Column(Text)  # any injuries or limitations
     equipment = Column(String)  # home, gym, mixed
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # Fixed timestamps for SQLite compatibility
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationship
+    user = relationship("User", back_populates="profile")
 
 class Workout(Base):
     __tablename__ = "workouts"
