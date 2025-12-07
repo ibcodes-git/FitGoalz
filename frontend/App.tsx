@@ -7,6 +7,7 @@ import DashboardScreen from './src/pages/DashboardScreen';
 import FitnessProfileScreen from './src/pages/FitnessProfileScreen';
 import { StackScreen } from 'react-native-screens';
 import WorkoutHistoryScreen from './src/pages/WorkoutHistoryScreen';
+import WorkoutDetailsScreen from './src/pages/WorkoutDetailsScreen';
 
 const Stack = createStackNavigator();
 
@@ -23,6 +24,11 @@ export default function App() {
           component={FitnessProfileScreen}
           options={{ title: 'Fitness Profile' }}
         />
+        <Stack.Screen 
+        name="WorkoutDetails" 
+        component={WorkoutDetailsScreen} 
+         options={{ title: 'Workout Details' }}
+       />
       </Stack.Navigator>
     </NavigationContainer>
   );

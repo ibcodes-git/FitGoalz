@@ -1,91 +1,43 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.database import get_db
-from app.models import User, UserProfile
+from app.models import User, UserProfile, WorkoutFeedback
 from app.routers.auth import get_current_user
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 router = APIRouter()
 
-@router.post("/fitness-profile")
-async def create_fitness_profile(
-    profile_data: dict,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Create or update user fitness profile"""
-    
-    print(f"🔍 DEBUG: Received profile data: {profile_data}")
-    print(f"🔍 DEBUG: Current user ID: {current_user.id}")
-    
-    try:
-        # Check if profile already exists
-        existing_profile = db.query(UserProfile).filter(
-            UserProfile.user_id == current_user.id
-        ).first()
-        
-        if existing_profile:
-            print("🔍 DEBUG: Updating existing profile...")
-            # Update existing profile
-            for key, value in profile_data.items():
-                if hasattr(existing_profile, key):
-                    setattr(existing_profile, key, value)
-            
-            # CRITICAL FIX: Manually set updated_at with datetime object
-            existing_profile.updated_at = datetime.utcnow()
-            
-            db.commit()
-            db.refresh(existing_profile)
-            
-            print("✅ DEBUG: Profile updated successfully")
-            return {
-                "message": "Fitness profile updated successfully", 
-                "profile": existing_profile
-            }
-        else:
-            print("🔍 DEBUG: Creating new profile...")
-            # Create new profile
-            profile_data['user_id'] = current_user.id
-            
-            # CRITICAL FIX: Set timestamps as datetime objects
-            profile_data['created_at'] = datetime.utcnow()
-            profile_data['updated_at'] = datetime.utcnow()
-            
-            new_profile = UserProfile(**profile_data)
-            db.add(new_profile)
-            db.commit()
-            db.refresh(new_profile)
-            
-            print("✅ DEBUG: Profile created successfully")
-            return {
-                "message": "Fitness profile created successfully", 
-                "profile": new_profile
-            }
-            
-    except Exception as e:
-        db.rollback()
-        print(f"❌ ERROR in create_fitness_profile: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Failed to save profile: {str(e)}"
-        )
+# ========== PROFILE ENDPOINTS (Match frontend /api/fitness-profile) ==========
 
 @router.get("/fitness-profile")
 async def get_fitness_profile(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get user fitness profile"""
-    profile = db.query(UserProfile).filter(
-        UserProfile.user_id == current_user.id
-    ).first()
+    """Get user fitness profile - Matches frontend GET /api/fitness-profile"""
+    print(f"🔍 DEBUG GET: User ID: {current_user.id}")
+    
+    profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
     
     if not profile:
-        raise HTTPException(status_code=404, detail="Fitness profile not found")
+        print("🔍 DEBUG: No profile found")
+        # Don't throw error, return empty data
+        return {
+            "age": None,
+            "weight": None,
+            "height": None,
+            "gender": None,
+            "fitness_level": None,
+            "goals": None,
+            "workout_days": None,
+            "workout_duration": None,
+            "injuries": None,
+            "equipment": None,
+            "activity_level": None
+        }
     
+    print(f"🔍 DEBUG: Profile found: {profile.id}")
     return {
         "id": profile.id,
         "user_id": profile.user_id,
@@ -99,160 +51,335 @@ async def get_fitness_profile(
         "workout_duration": profile.workout_duration,
         "injuries": profile.injuries,
         "equipment": profile.equipment,
-        "created_at": profile.created_at,
-        "updated_at": profile.updated_at
+        "activity_level": profile.activity_level,
+        "created_at": profile.created_at.isoformat() if profile.created_at else None,
+        "updated_at": profile.updated_at.isoformat() if profile.updated_at else None
     }
 
-@router.get("/fitness-stats")
-async def get_fitness_stats(
+@router.post("/fitness-profile")
+async def save_fitness_profile(
+    profile_data: dict,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get user fitness statistics and insights"""
-    print("🔍 DEBUG: Starting fitness-stats endpoint...")
+    """Save user fitness profile - Matches frontend POST /api/fitness-profile"""
+    print(f"🔍 DEBUG POST: User ID: {current_user.id}")
+    print(f"🔍 DEBUG POST: Profile data: {profile_data}")
     
     try:
-        profile = db.query(UserProfile).filter(
-            UserProfile.user_id == current_user.id
-        ).first()
-        print(f"🔍 DEBUG: Profile found: {profile is not None}")
+        # Find existing profile
+        profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
         
-        if not profile:
-            raise HTTPException(status_code=404, detail="Fitness profile not found")
-        
-        print(f"🔍 DEBUG: Profile data - Height: {profile.height}, Weight: {profile.weight}, Goals: {profile.goals}")
-        
-        # Calculate BMI
-        if profile.height and profile.weight:
-            height_m = profile.height / 100
-            bmi = profile.weight / (height_m ** 2)
-            print(f"🔍 DEBUG: BMI calculated: {bmi}")
+        if profile:
+            print("🔍 DEBUG: Updating existing profile")
+            # Update existing profile
+            for key, value in profile_data.items():
+                if hasattr(profile, key) and key not in ['id', 'user_id', 'created_at']:
+                    setattr(profile, key, value)
             
-            # Determine BMI category
-            if bmi < 18.5:
-                bmi_category = "Underweight"
-            elif bmi < 25:
-                bmi_category = "Normal" 
-            elif bmi < 30:
-                bmi_category = "Overweight"
-            else:
-                bmi_category = "Obese"
+            profile.updated_at = datetime.utcnow()
+            message = "Profile updated successfully"
         else:
-            bmi = None
-            bmi_category = "Not enough data"
+            print("🔍 DEBUG: Creating new profile")
+            # Create new profile
+            profile_data['user_id'] = current_user.id
+            profile_data['created_at'] = datetime.utcnow()
+            profile_data['updated_at'] = datetime.utcnow()
+            
+            # Filter valid fields
+            valid_fields = {}
+            for key, value in profile_data.items():
+                if hasattr(UserProfile, key):
+                    valid_fields[key] = value
+            
+            profile = UserProfile(**valid_fields)
+            db.add(profile)
+            message = "Profile created successfully"
         
-        print(f"🔍 DEBUG: BMI category: {bmi_category}")
+        db.commit()
+        db.refresh(profile)
         
-        # Calculate weekly workout minutes
-        if profile.workout_days and profile.workout_duration:
-            weekly_minutes = profile.workout_days * profile.workout_duration
-        else:
-            weekly_minutes = 0
+        print(f"✅ DEBUG: Profile saved with ID: {profile.id}")
         
-        print(f"🔍 DEBUG: Weekly minutes: {weekly_minutes}")
-        
-        # Calculate calories
-        calories = _calculate_calories(profile)
-        print(f"🔍 DEBUG: Recommended calories: {calories}")
-        
-        # Generate workout recommendations
-        recommendations = _generate_recommendations(profile, bmi_category if bmi else None)
-        
-        # Generate insights
-        stats = {
-            "bmi": round(bmi, 1) if bmi else None,
-            "bmi_category": bmi_category,
-            "weekly_workout_minutes": weekly_minutes,
-            "fitness_goal": profile.goals.replace('_', ' ').title() if profile.goals else "Not set",
-            "recommended_calories": calories,
-            "workout_recommendations": recommendations,
-            "profile_completeness": _calculate_profile_completeness(profile)
+        return {
+            "message": message,
+            "profile": {
+                'id': profile.id,
+                'user_id': profile.user_id,
+                'age': profile.age,
+                'weight': profile.weight,
+                'height': profile.height,
+                'gender': profile.gender,
+                'fitness_level': profile.fitness_level,
+                'goals': profile.goals,
+                'workout_days': profile.workout_days,
+                'workout_duration': profile.workout_duration,
+                'injuries': profile.injuries,
+                'equipment': profile.equipment,
+                'activity_level': profile.activity_level,
+            }
         }
         
-        print(f"🔍 DEBUG: Final stats: {stats}")
-        return stats
-        
     except Exception as e:
-        print(f"❌ ERROR in fitness-stats: {e}")
+        db.rollback()
+        print(f"❌ ERROR in save_fitness_profile: {str(e)}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save profile: {str(e)}")
 
-def _calculate_calories(profile: UserProfile) -> int:
-    """Calculate recommended daily calories based on profile"""
-    print(f"🔍 DEBUG: Calculating calories for goals: {profile.goals}")
+# ========== WORKOUT ENDPOINTS ==========
+
+@router.get("/my-workouts")
+async def get_my_workouts(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get user's workout history - Matches frontend GET /api/my-workouts"""
+    workouts = db.query(WorkoutFeedback).filter(
+        WorkoutFeedback.user_id == current_user.id
+    ).order_by(WorkoutFeedback.created_at.desc()).all()
     
-    if not profile.age or not profile.weight or not profile.height or not profile.gender:
-        return 2000  # Default fallback
+    if not workouts:
+        return {
+            "total_workouts": 0,
+            "workouts": [],
+            "message": "No workouts logged yet"
+        }
     
-    # Basic BMR calculation (simplified)
-    if profile.gender.lower() == 'male':
-        bmr = 10 * profile.weight + 6.25 * profile.height - 5 * profile.age + 5
-    else:
-        bmr = 10 * profile.weight + 6.25 * profile.height - 5 * profile.age - 161
+    workout_list = []
+    for workout in workouts:
+        # Calculate completion rate
+        completion_data = workout.completion_data or {}
+        total_exercises = completion_data.get('total_exercises', 1)
+        completed_exercises = completion_data.get('completed_exercises', 0)
+        completion_rate = (completed_exercises / total_exercises * 100) if total_exercises > 0 else 0
+        
+        workout_list.append({
+            "id": workout.id,
+            "workout_name": workout.workout_name or "Workout Session",
+            "workout_type": workout.workout_type or "ml_generated",
+            "duration_minutes": workout.duration_minutes or 30,
+            "difficulty_rating": workout.difficulty_rating or 3,
+            "energy_level": workout.energy_level or 3,
+            "completion_rate": round(completion_rate, 1),
+            "rating": workout.rating or 3,
+            "personal_notes": workout.personal_notes or "",
+            "created_at": workout.created_at.isoformat() if workout.created_at else None,
+            "feedback_text": workout.feedback_text or "",
+            "workout_plan": workout.workout_plan or {},
+            "exercises_logged": workout.exercises_logged or []
+        })
     
-    # Adjust for activity level
-    activity_multipliers = {
-        'beginner': 1.2,
-        'intermediate': 1.375,
-        'advanced': 1.55
+    return {
+        "total_workouts": len(workouts),
+        "workouts": workout_list
     }
-    
-    activity_level = profile.fitness_level or 'beginner'
-    maintenance_calories = bmr * activity_multipliers.get(activity_level, 1.2)
-    
-    # Adjust for goals
-    if profile.goals == 'weight_loss':
-        return int(maintenance_calories - 500)
-    elif profile.goals == 'muscle_gain':
-        return int(maintenance_calories + 300)
-    else:
-        return int(maintenance_calories)
 
-def _generate_recommendations(profile: UserProfile, bmi_category: str = None) -> list:
-    """Generate personalized workout and fitness recommendations"""
-    recommendations = []
+@router.get("/workout-details/{workout_id}")
+async def get_workout_details(
+    workout_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get detailed workout information - Matches frontend GET /api/workout-details/{id}"""
+    workout = db.query(WorkoutFeedback).filter(
+        WorkoutFeedback.id == workout_id,
+        WorkoutFeedback.user_id == current_user.id
+    ).first()
     
-    # BMI-based recommendations
-    if bmi_category == "Overweight" or bmi_category == "Obese":
-        recommendations.append("Focus on cardio exercises and full-body workouts for effective weight loss")
-    elif bmi_category == "Underweight":
-        recommendations.append("Include strength training with progressive overload to build muscle mass")
+    if not workout:
+        raise HTTPException(status_code=404, detail="Workout not found")
     
-    # Goal-based recommendations
-    if profile.goals == 'weight_loss':
-        recommendations.append("Combine strength training with 20-30 minutes of cardio per session")
-        recommendations.append("Aim for a calorie deficit of 300-500 calories per day")
-    elif profile.goals == 'muscle_gain':
-        recommendations.append("Focus on compound exercises with progressive overload")
-        recommendations.append("Ensure adequate protein intake (1.6-2.2g per kg of body weight)")
-    elif profile.goals == 'endurance':
-        recommendations.append("Gradually increase workout duration and incorporate interval training")
-        recommendations.append("Include exercises that improve cardiovascular fitness")
+    # Calculate completion rate
+    completion_data = workout.completion_data or {}
+    total_exercises = completion_data.get('total_exercises', 1)
+    completed_exercises = completion_data.get('completed_exercises', 0)
+    completion_rate = (completed_exercises / total_exercises * 100) if total_exercises > 0 else 0
     
-    # Fitness level recommendations
-    if profile.fitness_level == 'beginner':
-        recommendations.append("Start with 3 days per week and focus on learning proper form")
-    elif profile.fitness_level == 'intermediate':
-        recommendations.append("Consider adding variety with supersets and circuit training")
-    elif profile.fitness_level == 'advanced':
-        recommendations.append("Incorporate advanced techniques like drop sets and pyramid training")
-    
-    # Equipment-based recommendations
-    if profile.equipment == 'home':
-        recommendations.append("Bodyweight exercises and resistance bands are great for home workouts")
-    elif profile.equipment == 'gym':
-        recommendations.append("Take advantage of gym equipment for varied and progressive training")
-    
-    return recommendations
+    return {
+        "workout_details": {
+            "id": workout.id,
+            "workout_name": workout.workout_name or "Workout Session",
+            "workout_type": workout.workout_type or "ml_generated",
+            "duration_minutes": workout.duration_minutes or 30,
+            "difficulty_rating": workout.difficulty_rating or 3,
+            "energy_level": workout.energy_level or 3,
+            "personal_notes": workout.personal_notes or "",
+            "created_at": workout.created_at.isoformat() if workout.created_at else None
+        },
+        "workout_plan": workout.workout_plan or {},
+        "completion_data": {
+            **completion_data,
+            "completion_rate": round(completion_rate, 1)
+        },
+        "exercises_logged": workout.exercises_logged or [],
+        "ai_feedback": {
+            "feedback_text": workout.feedback_text or "",
+            "rating": workout.rating or 3
+        }
+    }
 
-def _calculate_profile_completeness(profile: UserProfile) -> int:
-    """Calculate how complete the user profile is (0-100%)"""
-    required_fields = ['age', 'weight', 'height', 'gender', 'fitness_level', 'goals', 'workout_days', 'workout_duration']
-    completed_fields = 0
+@router.post("/log-workout")
+async def log_workout(
+    workout_data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Log a new workout - Matches frontend POST /api/log-workout"""
+    print(f"🔍 DEBUG: Logging workout for user {current_user.id}")
     
-    for field in required_fields:
-        if getattr(profile, field, None) not in [None, 0, '']:
-            completed_fields += 1
+    try:
+        # Check if user has profile
+        user_profile = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+        
+        if not user_profile:
+            raise HTTPException(status_code=400, detail="Please complete your fitness profile first")
+        
+        # Generate simple AI feedback based on completion
+        completion_data = workout_data.get('completion_data', {})
+        total_exercises = completion_data.get('total_exercises', 1)
+        completed_exercises = completion_data.get('completed_exercises', 0)
+        completion_rate = (completed_exercises / total_exercises * 100) if total_exercises > 0 else 0
+        
+        if completion_rate >= 80:
+            feedback_text = "Excellent work! You completed most of your workout. Keep up the great consistency!"
+            rating = 5
+        elif completion_rate >= 50:
+            feedback_text = "Good effort! You're making progress. Try to complete a few more exercises next time."
+            rating = 4
+        else:
+            feedback_text = "Every workout counts! Even partial completion helps build the habit. Keep going!"
+            rating = 3
+        
+        # Create workout feedback
+        workout_feedback = WorkoutFeedback(
+            user_id=current_user.id,
+            workout_name=workout_data.get('workout_name', 'Workout Session'),
+            workout_type=workout_data.get('workout_type', 'ml_generated'),
+            duration_minutes=workout_data.get('duration_minutes', 30),
+            difficulty_rating=workout_data.get('difficulty_rating', 3),
+            energy_level=workout_data.get('energy_level', 3),
+            personal_notes=workout_data.get('personal_notes', ''),
+            workout_plan=workout_data.get('workout_plan', {}),
+            completion_data=completion_data,
+            exercises_logged=workout_data.get('exercises_logged', []),
+            feedback_text=feedback_text,
+            rating=rating
+        )
+        
+        db.add(workout_feedback)
+        db.commit()
+        db.refresh(workout_feedback)
+        
+        print(f"✅ DEBUG: Workout logged successfully with ID: {workout_feedback.id}")
+        
+        return {
+            "message": "Workout logged and feedback generated successfully",
+            "workout_log_id": workout_feedback.id,
+            "feedback": {
+                "feedback_text": feedback_text,
+                "rating": rating,
+                "completion_rate": round(completion_rate, 1)
+            }
+        }
+        
+    except Exception as e:
+        db.rollback()
+        print(f"❌ ERROR in log_workout: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to log workout: {str(e)}")
+
+@router.get("/progress-analytics")
+async def get_progress_analytics(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get progress analytics - Matches frontend GET /api/progress-analytics"""
+    workouts = db.query(WorkoutFeedback).filter(
+        WorkoutFeedback.user_id == current_user.id
+    ).all()
     
-    return int((completed_fields / len(required_fields)) * 100)
+    if not workouts:
+        return {
+            "message": "No workout data available yet",
+            "total_workouts": 0,
+            "average_rating": 0,
+            "average_duration": 0,
+            "current_streak": 0,
+            "weekly_workouts": 0,
+            "consistency_score": 0
+        }
+    
+    # Calculate basic analytics
+    total_workouts = len(workouts)
+    average_rating = sum(w.rating or 3 for w in workouts) / total_workouts
+    average_duration = sum(w.duration_minutes or 30 for w in workouts) / total_workouts
+    
+    # Calculate streak (simplified)
+    current_streak = 0
+    if workouts:
+        workouts_sorted = sorted(workouts, key=lambda x: x.created_at, reverse=True)
+        current_date = datetime.utcnow().date()
+        
+        for i, workout in enumerate(workouts_sorted):
+            workout_date = workout.created_at.date()
+            days_diff = (current_date - workout_date).days
+            
+            if days_diff == i:  # Consecutive days
+                current_streak += 1
+            else:
+                break
+    
+    # Calculate weekly workouts
+    week_ago = datetime.utcnow() - timedelta(days=7)
+    weekly_workouts = len([w for w in workouts if w.created_at >= week_ago])
+    
+    # Consistency score (0-100)
+    consistency_score = min(100, (weekly_workouts / 3) * 100)
+    
+    return {
+        "total_workouts": total_workouts,
+        "average_rating": round(average_rating, 1),
+        "average_duration": round(average_duration, 1),
+        "current_streak": current_streak,
+        "weekly_workouts": weekly_workouts,
+        "consistency_score": consistency_score,
+        "progress_trend": "improving" if total_workouts > 3 and average_rating >= 4 else "starting"
+    }
+
+# ========== BACKWARD COMPATIBILITY ENDPOINTS ==========
+
+@router.post("/workout-feedback")
+async def submit_workout_feedback(
+    feedback_data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Legacy endpoint for backward compatibility"""
+    return await log_workout(feedback_data, current_user, db)
+
+# ========== HEALTH CHECK ==========
+
+@router.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "message": "Profile service is running"}
+
+# ========== INFO ENDPOINT ==========
+
+@router.get("/")
+async def get_endpoints_info():
+    """Get information about available endpoints"""
+    return {
+        "message": "Fitness profile and workout logging system",
+        "endpoints": {
+            "GET /fitness-profile": "Get fitness profile",
+            "POST /fitness-profile": "Save/update fitness profile",
+            "GET /my-workouts": "Get workout history",
+            "GET /workout-details/{id}": "Get detailed workout info",
+            "POST /log-workout": "Log new workout with AI feedback",
+            "GET /progress-analytics": "Get progress analytics",
+            "POST /workout-feedback": "Legacy feedback endpoint"
+        }
+    }

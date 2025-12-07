@@ -1,19 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
-  ScrollView, 
-  Alert, 
-  ActivityIndicator, 
-  TextInput,
-  SafeAreaView,
-  Dimensions,
-  ImageBackground
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, 
+  ActivityIndicator, Dimensions, Modal, TextInput, ImageBackground
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons, MaterialIcons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons, FontAwesome5, MaterialCommunityIcons, FontAwesome, AntDesign } from '@expo/vector-icons';
 import { authAPI, workoutsAPI, feedbackAPI, userAPI } from '../services/api';
 
 const { width, height } = Dimensions.get('window');
@@ -24,21 +16,46 @@ export default function DashboardScreen({ navigation }) {
   const [workoutPlan, setWorkoutPlan] = useState(null);
   const [workoutHistory, setWorkoutHistory] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [loggingWorkout, setLoggingWorkout] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [selectedWorkout, setSelectedWorkout] = useState(null);
   const [activeTab, setActiveTab] = useState('home');
+  const [stats, setStats] = useState({
+    totalWorkouts: 0,
+    caloriesBurned: 0,
+    streakDays: 0,
+    avgRating: 0
+  });
+  
+  // Workout Logging States
+  const [loggingWorkout, setLoggingWorkout] = useState(false);
+  const [showLogModal, setShowLogModal] = useState(false);
+  const [workoutLogData, setWorkoutLogData] = useState({
+    difficulty_rating: 3,
+    energy_level: 3,
+    personal_notes: '',
+    completion_rate: 100,
+    exercises_completed: []
+  });
 
   useEffect(() => {
     fetchUserProfile();
     fetchFitnessProfile();
+    calculateStats();
   }, []);
 
   useEffect(() => {
     if (activeTab === 'history') {
       fetchWorkoutHistory();
     }
-  }, [activeTab]);
+    if (activeTab === 'workout' && workoutPlan) {
+      initializeWorkoutLogData();
+    }
+  }, [activeTab, workoutPlan]);
+
+  useEffect(() => {
+    if (workoutHistory.length > 0) {
+      calculateStats();
+    }
+  }, [workoutHistory]);
 
   const fetchUserProfile = async () => {
     try {
@@ -74,12 +91,55 @@ export default function DashboardScreen({ navigation }) {
     }
   };
 
+  const calculateStats = () => {
+    const totalWorkouts = workoutHistory.length;
+    const caloriesBurned = workoutHistory.reduce((sum, workout) => sum + (workout.calories_burned || 0), 0);
+    const avgRating = workoutHistory.length > 0 
+      ? (workoutHistory.reduce((sum, workout) => sum + (workout.rating || 0), 0) / workoutHistory.length).toFixed(1)
+      : 0;
+    
+    // Calculate streak (simplified)
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const streakDays = workoutHistory.filter(w => {
+      const workoutDate = new Date(w.created_at);
+      return workoutDate.toDateString() === today.toDateString() || 
+             workoutDate.toDateString() === yesterday.toDateString();
+    }).length;
+
+    setStats({
+      totalWorkouts,
+      caloriesBurned,
+      streakDays,
+      avgRating: parseFloat(avgRating)
+    });
+  };
+
+  const initializeWorkoutLogData = () => {
+    if (workoutPlan) {
+      const exercises = workoutPlan.workout?.exercises || workoutPlan.exercises || [];
+      setWorkoutLogData({
+        difficulty_rating: 3,
+        energy_level: 3,
+        personal_notes: '',
+        completion_rate: 100,
+        exercises_completed: exercises.map(exercise => ({
+          name: exercise,
+          completed: true,
+          notes: ''
+        }))
+      });
+    }
+  };
+
   const generateWorkout = async () => {
     setLoading(true);
     try {
       const response = await workoutsAPI.generateWorkout();
       setWorkoutPlan(response.data);
       Alert.alert('Success', 'Personalized workout generated!');
+      initializeWorkoutLogData();
     } catch (error) {
       Alert.alert('Error', 'Failed to generate workout. Please complete your fitness profile first.');
       console.error('Workout error:', error);
@@ -88,7 +148,24 @@ export default function DashboardScreen({ navigation }) {
     }
   };
 
-  const quickLogWorkout = async () => {
+  const toggleExerciseCompletion = (index) => {
+    const updatedExercises = [...workoutLogData.exercises_completed];
+    updatedExercises[index] = {
+      ...updatedExercises[index],
+      completed: !updatedExercises[index].completed
+    };
+    
+    const completedCount = updatedExercises.filter(ex => ex.completed).length;
+    const completionRate = Math.round((completedCount / updatedExercises.length) * 100);
+    
+    setWorkoutLogData(prev => ({
+      ...prev,
+      exercises_completed: updatedExercises,
+      completion_rate: completionRate
+    }));
+  };
+
+  const enhancedLogWorkout = async () => {
     if (!workoutPlan) {
       Alert.alert('Error', 'Please generate a workout first');
       return;
@@ -96,29 +173,61 @@ export default function DashboardScreen({ navigation }) {
 
     setLoggingWorkout(true);
     try {
+      const exercises = workoutPlan.workout?.exercises || workoutPlan.exercises || [];
+      const completedExercises = workoutLogData.exercises_completed.filter(ex => ex.completed).length;
+      
       const workoutData = {
-        workout_name: workoutPlan.workout?.plan_name || workoutPlan.plan_name || "Quick Workout",
+        workout_name: workoutPlan.workout?.plan_name || workoutPlan.plan_name || "ML Generated Workout",
         workout_type: "ml_generated",
         duration_minutes: workoutPlan.workout?.duration || workoutPlan.duration || 30,
-        difficulty_rating: 3,
-        energy_level: 3,
-        personal_notes: "Quick log - completed workout",
+        difficulty_rating: workoutLogData.difficulty_rating,
+        energy_level: workoutLogData.energy_level,
+        personal_notes: workoutLogData.personal_notes,
         workout_plan: workoutPlan.workout || workoutPlan,
+        exercises_logged: exercises,
         completion_data: {
-          completed_exercises: workoutPlan.workout?.exercises?.length || workoutPlan.exercises?.length || 0,
-          total_exercises: workoutPlan.workout?.exercises?.length || workoutPlan.exercises?.length || 0
+          completed_exercises: completedExercises,
+          total_exercises: exercises.length,
+          completion_rate: workoutLogData.completion_rate
         }
       };
 
       const response = await feedbackAPI.logWorkout(workoutData);
+      
       Alert.alert(
-        '✅ Workout Logged!', 
-        `AI Feedback: ${response.data.feedback.feedback_text}\n\nRating: ${response.data.feedback.rating}/5`
+        '✅ Workout Logged Successfully!', 
+        `AI Feedback: ${response.data.feedback.feedback_text}\n\nRating: ${response.data.feedback.rating}/5\nCompletion: ${workoutLogData.completion_rate}%`,
+        [
+          {
+            text: 'View History',
+            onPress: () => {
+              setActiveTab('history');
+              fetchWorkoutHistory();
+            }
+          },
+          {
+            text: 'Close',
+            style: 'cancel'
+          }
+        ]
       );
       
+      // Reset form
+      setShowLogModal(false);
+      setWorkoutLogData({
+        difficulty_rating: 3,
+        energy_level: 3,
+        personal_notes: '',
+        completion_rate: 100,
+        exercises_completed: []
+      });
+      
     } catch (error) {
-      Alert.alert('Error', 'Failed to log workout');
-      console.error('Quick log error:', error);
+      console.error('Workout logging error:', error);
+      Alert.alert(
+        'Error', 
+        error.response?.data?.detail || 'Failed to log workout. Please try again.'
+      );
     } finally {
       setLoggingWorkout(false);
     }
@@ -170,42 +279,255 @@ export default function DashboardScreen({ navigation }) {
     return 'N/A';
   };
 
+  const getBMIStatus = (bmi) => {
+    if (bmi === 'N/A') return { color: '#666', label: 'N/A' };
+    const numBMI = parseFloat(bmi);
+    if (numBMI < 18.5) return { color: '#2196F3', label: 'Underweight' };
+    if (numBMI < 25) return { color: '#4CAF50', label: 'Normal' };
+    if (numBMI < 30) return { color: '#FF9800', label: 'Overweight' };
+    return { color: '#F44336', label: 'Obese' };
+  };
+
+  const getTimeOfDay = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Morning';
+    if (hour < 17) return 'Afternoon';
+    return 'Evening';
+  };
+
+  // Tab-specific background renderer
+  const renderTabBackground = (tab) => {
+    switch(tab) {
+      case 'home':
+        return (
+          <ImageBackground
+            source={require('../assets/images/dashboard-bg.jpg')}
+            style={styles.backgroundImage}
+            resizeMode="cover"
+          >
+            <LinearGradient
+              colors={['rgba(255, 255, 255, 0.97)', 'rgba(248, 249, 250, 0.97)']}
+              style={styles.overlay}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            />
+          </ImageBackground>
+        );
+      case 'workout':
+        return (
+          <ImageBackground
+            source={require('../assets/images/workout-bg.jpg')}
+            style={styles.backgroundImage}
+            resizeMode="cover"
+          >
+            <LinearGradient
+              colors={['rgba(255, 255, 255, 0.92)', 'rgba(240, 248, 255, 0.92)']}
+              style={styles.overlay}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            />
+          </ImageBackground>
+        );
+      case 'history':
+        return (
+          <ImageBackground
+            source={require('../assets/images/logo.jpg')}
+            style={styles.logoBackground}
+            resizeMode="contain"
+          >
+            <LinearGradient
+              colors={['rgba(255, 255, 255, 0.95)', 'rgba(245, 247, 250, 0.95)']}
+              style={styles.overlay}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            />
+          </ImageBackground>
+        );
+      case 'profile':
+        return (
+          <ImageBackground
+            source={require('../assets/images/dashboard-bg.jpg')}
+            style={styles.backgroundImage}
+            resizeMode="cover"
+          >
+            <LinearGradient
+              colors={['rgba(255, 255, 255, 0.97)', 'rgba(250, 250, 252, 0.97)']}
+              style={styles.overlay}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            />
+          </ImageBackground>
+        );
+      default:
+        return (
+          <LinearGradient
+            colors={['rgba(255, 255, 255, 0.97)', 'rgba(248, 249, 250, 0.97)']}
+            style={styles.overlay}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          />
+        );
+    }
+  };
+
   // Tab Content Renderer
   const renderTabContent = () => {
     switch (activeTab) {
       case 'home':
         return (
-          <ImageBackground 
-            source={require('../assets/images/dashboard-bg.jpg')}
-            style={styles.backgroundImage}
-            resizeMode="cover"
+          <ScrollView 
+            style={styles.tabScrollView}
+            contentContainerStyle={styles.tabScrollContent}
+            showsVerticalScrollIndicator={false}
           >
-            <ScrollView 
-              style={styles.tabScrollView}
-              contentContainerStyle={styles.tabScrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {/* User Profile Header */}
-              <View style={styles.profileCard}>
-                <LinearGradient
-                  colors={['rgba(102, 126, 234, 0.9)', 'rgba(118, 75, 162, 0.9)']}
-                  style={styles.profileGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                >
-                  <View style={styles.profileAvatarContainer}>
-                    <View style={styles.profileAvatar}>
-                      <Text style={styles.profileAvatarText}>
+            {/* Welcome Header */}
+            <View style={styles.welcomeCard}>
+              <LinearGradient
+                colors={['rgba(102, 126, 234, 0.95)', 'rgba(118, 75, 162, 0.95)']}
+                style={styles.welcomeGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <View style={styles.welcomeHeader}>
+                  <View style={styles.avatarContainer}>
+                    <View style={styles.avatar}>
+                      <Text style={styles.avatarText}>
                         {user?.username?.charAt(0).toUpperCase() || 'U'}
                       </Text>
                     </View>
+                    <View style={styles.welcomeTextContainer}>
+                      <Text style={styles.greetingText}>Good {getTimeOfDay()},</Text>
+                      <Text style={styles.userName}>{user?.username || 'User'}</Text>
+                    </View>
                   </View>
-                  <Text style={styles.profileName}>{user?.username || 'User'}</Text>
-                  <Text style={styles.profileEmail}>{user?.email || 'user@example.com'}</Text>
-                </LinearGradient>
-              </View>
+                  <View style={styles.statsBadge}>
+                    <Ionicons name="flame" size={16} color="#FF6B6B" />
+                    <Text style={styles.statsBadgeText}>{stats.streakDays} day streak</Text>
+                  </View>
+                </View>
+                
+                {/* Quick Stats */}
+                <View style={styles.quickStats}>
+                  <View style={styles.statItem}>
+                    <View style={styles.statIconContainer}>
+                      <MaterialCommunityIcons name="dumbbell" size={18} color="#667eea" />
+                    </View>
+                    <View>
+                      <Text style={styles.statValue}>{stats.totalWorkouts}</Text>
+                      <Text style={styles.statLabel}>Workouts</Text>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.statDivider} />
+                  
+                  <View style={styles.statItem}>
+                    <View style={styles.statIconContainer}>
+                      <Ionicons name="flame" size={18} color="#FF6B6B" />
+                    </View>
+                    <View>
+                      <Text style={styles.statValue}>{stats.caloriesBurned}</Text>
+                      <Text style={styles.statLabel}>Calories</Text>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.statDivider} />
+                  
+                  <View style={styles.statItem}>
+                    <View style={styles.statIconContainer}>
+                      <FontAwesome name="star" size={16} color="#FFD700" />
+                    </View>
+                    <View>
+                      <Text style={styles.statValue}>{stats.avgRating}</Text>
+                      <Text style={styles.statLabel}>Avg Rating</Text>
+                    </View>
+                  </View>
+                </View>
+              </LinearGradient>
+            </View>
 
-              {/* Fitness Profile Summary */}
+            {/* Quick Actions */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Quick Actions</Text>
+                <Ionicons name="flash" size={20} color="#667eea" />
+              </View>
+              <View style={styles.quickActions}>
+                <TouchableOpacity 
+                  style={styles.quickActionCard}
+                  onPress={() => setActiveTab('workout')}
+                >
+                  <LinearGradient
+                    colors={['rgba(250, 112, 154, 0.9)', 'rgba(254, 225, 64, 0.9)']}
+                    style={styles.quickActionGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                  >
+                    <View style={styles.quickActionIcon}>
+                      <FontAwesome5 name="dumbbell" size={22} color="white" />
+                    </View>
+                    <Text style={styles.quickActionText}>New Workout</Text>
+                    <Text style={styles.quickActionSubtext}>Generate AI workout</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={styles.quickActionCard}
+                  onPress={() => navigation.navigate('FitnessProfile')}
+                >
+                  <LinearGradient
+                    colors={['rgba(67, 233, 123, 0.9)', 'rgba(56, 249, 215, 0.9)']}
+                    style={styles.quickActionGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                  >
+                    <View style={styles.quickActionIcon}>
+                      <Ionicons name="fitness" size={24} color="white" />
+                    </View>
+                    <Text style={styles.quickActionText}>Edit Profile</Text>
+                    <Text style={styles.quickActionSubtext}>Update preferences</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={styles.quickActionCard}
+                  onPress={() => setActiveTab('history')}
+                >
+                  <LinearGradient
+                    colors={['rgba(102, 126, 234, 0.9)', 'rgba(118, 75, 162, 0.9)']}
+                    style={styles.quickActionGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                  >
+                    <View style={styles.quickActionIcon}>
+                      <MaterialIcons name="history" size={22} color="white" />
+                    </View>
+                    <Text style={styles.quickActionText}>History</Text>
+                    <Text style={styles.quickActionSubtext}>View progress</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={styles.quickActionCard}
+                  onPress={() => setActiveTab('profile')}
+                >
+                  <LinearGradient
+                    colors={['rgba(255, 107, 107, 0.9)', 'rgba(255, 159, 67, 0.9)']}
+                    style={styles.quickActionGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                  >
+                    <View style={styles.quickActionIcon}>
+                      <Ionicons name="person" size={22} color="white" />
+                    </View>
+                    <Text style={styles.quickActionText}>Profile</Text>
+                    <Text style={styles.quickActionSubtext}>Account settings</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Fitness Profile Summary */}
+            {fitnessProfile && (
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Text style={styles.sectionTitle}>Fitness Profile</Text>
@@ -218,149 +540,209 @@ export default function DashboardScreen({ navigation }) {
                   </TouchableOpacity>
                 </View>
 
-                {fitnessProfile ? (
-                  <View style={styles.fitnessDetailsCard}>
-                    <View style={styles.statsGrid}>
-                      <View style={styles.statItem}>
-                        <Text style={styles.statValue}>{fitnessProfile.age || 'N/A'}</Text>
-                        <Text style={styles.statLabel}>Age</Text>
+                <View style={styles.fitnessDetailsCard}>
+                  <View style={styles.statsGrid}>
+                    <View style={styles.statContainer}>
+                      <View style={styles.statCircle}>
+                        <Text style={styles.statCircleValue}>{fitnessProfile.age || 'N/A'}</Text>
                       </View>
-                      <View style={styles.statItem}>
-                        <Text style={styles.statValue}>{fitnessProfile.weight || 'N/A'}</Text>
-                        <Text style={styles.statLabel}>Weight (kg)</Text>
-                      </View>
-                      <View style={styles.statItem}>
-                        <Text style={styles.statValue}>{fitnessProfile.height || 'N/A'}</Text>
-                        <Text style={styles.statLabel}>Height (cm)</Text>
-                      </View>
-                      <View style={styles.statItem}>
-                        <Text style={styles.statValue}>{calculateBMI()}</Text>
-                        <Text style={styles.statLabel}>BMI</Text>
-                      </View>
+                      <Text style={styles.statLabelSmall}>Age</Text>
                     </View>
-
-                    <View style={styles.detailsGrid}>
-                      <View style={styles.detailRow}>
-                        <Ionicons name="body" size={16} color="#667eea" />
-                        <Text style={styles.detailLabel}>Gender:</Text>
-                        <Text style={styles.detailValue}>{fitnessProfile.gender || 'N/A'}</Text>
+                    
+                    <View style={styles.statContainer}>
+                      <View style={styles.statCircle}>
+                        <Text style={styles.statCircleValue}>{fitnessProfile.weight || 'N/A'}</Text>
+                        <Text style={styles.statUnit}>kg</Text>
                       </View>
-                      <View style={styles.detailRow}>
-                        <Ionicons name="fitness" size={16} color="#667eea" />
-                        <Text style={styles.detailLabel}>Level:</Text>
-                        <Text style={styles.detailValue}>{fitnessProfile.fitness_level || 'N/A'}</Text>
-                      </View>
-                      <View style={styles.detailRow}>
-                        <Ionicons name="flag" size={16} color="#667eea" />
-                        <Text style={styles.detailLabel}>Goal:</Text>
-                        <Text style={styles.detailValue}>{fitnessProfile.goals?.replace('_', ' ') || 'N/A'}</Text>
-                      </View>
-                      <View style={styles.detailRow}>
-                        <Ionicons name="calendar" size={16} color="#667eea" />
-                        <Text style={styles.detailLabel}>Days/Week:</Text>
-                        <Text style={styles.detailValue}>{fitnessProfile.workout_days || 'N/A'}</Text>
-                      </View>
-                      <View style={styles.detailRow}>
-                        <Ionicons name="time" size={16} color="#667eea" />
-                        <Text style={styles.detailLabel}>Duration:</Text>
-                        <Text style={styles.detailValue}>{fitnessProfile.workout_duration || 'N/A'} min</Text>
-                      </View>
-                      <View style={styles.detailRow}>
-                        <MaterialCommunityIcons name="dumbbell" size={16} color="#667eea" />
-                        <Text style={styles.detailLabel}>Equipment:</Text>
-                        <Text style={styles.detailValue}>{fitnessProfile.equipment || 'N/A'}</Text>
-                      </View>
+                      <Text style={styles.statLabelSmall}>Weight</Text>
                     </View>
-
-                    {fitnessProfile.injuries && (
-                      <View style={styles.injuriesSection}>
-                        <Text style={styles.injuriesLabel}>Health Notes:</Text>
-                        <Text style={styles.injuriesText}>{fitnessProfile.injuries}</Text>
+                    
+                    <View style={styles.statContainer}>
+                      <View style={styles.statCircle}>
+                        <Text style={styles.statCircleValue}>{fitnessProfile.height || 'N/A'}</Text>
+                        <Text style={styles.statUnit}>cm</Text>
                       </View>
-                    )}
+                      <Text style={styles.statLabelSmall}>Height</Text>
+                    </View>
+                    
+                    <View style={styles.statContainer}>
+                      <View style={[styles.statCircle, { backgroundColor: getBMIStatus(calculateBMI()).color + '20' }]}>
+                        <Text style={[styles.statCircleValue, { color: getBMIStatus(calculateBMI()).color }]}>
+                          {calculateBMI()}
+                        </Text>
+                      </View>
+                      <Text style={styles.statLabelSmall}>BMI</Text>
+                    </View>
                   </View>
-                ) : (
-                  <View style={styles.noProfileCard}>
-                    <Ionicons name="information-circle-outline" size={40} color="#667eea" />
-                    <Text style={styles.noProfileTitle}>Complete Your Profile</Text>
-                    <Text style={styles.noProfileText}>
-                      Set up your fitness profile to get personalized workouts
-                    </Text>
-                    <TouchableOpacity 
-                      style={styles.setupButton}
-                      onPress={() => navigation.navigate('FitnessProfile')}
-                    >
-                      <LinearGradient
-                        colors={['rgba(102, 126, 234, 0.9)', 'rgba(118, 75, 162, 0.9)']}
-                        style={styles.setupGradient}
-                      >
-                        <Text style={styles.setupButtonText}>Setup Profile</Text>
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
-
-              {/* Quick Stats */}
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Activity Summary</Text>
-                <View style={styles.quickStatsGrid}>
-                  <View style={styles.quickStatCard}>
-                    <LinearGradient
-                      colors={['rgba(79, 172, 254, 0.9)', 'rgba(0, 242, 254, 0.9)']}
-                      style={styles.quickStatGradient}
-                    >
-                      <MaterialIcons name="fitness-center" size={20} color="white" />
-                      <Text style={styles.quickStatNumber}>
-                        {workoutHistory.length}
+                  
+                  {calculateBMI() !== 'N/A' && (
+                    <View style={styles.bmiStatus}>
+                      <Text style={[styles.bmiStatusText, { color: getBMIStatus(calculateBMI()).color }]}>
+                        {getBMIStatus(calculateBMI()).label}
                       </Text>
-                      <Text style={styles.quickStatLabel}>Total Workouts</Text>
-                    </LinearGradient>
-                  </View>
-
-                  <View style={styles.quickStatCard}>
-                    <LinearGradient
-                      colors={['rgba(67, 233, 123, 0.9)', 'rgba(56, 249, 215, 0.9)']}
-                      style={styles.quickStatGradient}
-                    >
-                      <Ionicons name="flame" size={20} color="white" />
-                      <Text style={styles.quickStatNumber}>
-                        {workoutHistory.length > 0 ? 
-                          (workoutHistory.reduce((sum, w) => sum + (w.rating || 0), 0) / workoutHistory.length).toFixed(1) 
-                          : '0'}
-                      </Text>
-                      <Text style={styles.quickStatLabel}>Avg Rating</Text>
-                    </LinearGradient>
-                  </View>
+                    </View>
+                  )}
                 </View>
               </View>
-            </ScrollView>
-          </ImageBackground>
+            )}
+
+            {/* Recent Activity */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Recent Activity</Text>
+                <TouchableOpacity onPress={() => setActiveTab('history')}>
+                  <Text style={styles.seeAllText}>See All</Text>
+                </TouchableOpacity>
+              </View>
+              
+              {workoutHistory.slice(0, 3).map((workout, index) => (
+                <TouchableOpacity key={workout.id} style={styles.recentWorkoutCard}>
+                  <View style={styles.recentWorkoutIcon}>
+                    <FontAwesome5 name="running" size={16} color="#667eea" />
+                  </View>
+                  <View style={styles.recentWorkoutInfo}>
+                    <Text style={styles.recentWorkoutName} numberOfLines={1}>
+                      {workout.workout_name || workout.workout_plan?.plan_name || 'Workout Session'}
+                    </Text>
+                    <Text style={styles.recentWorkoutDate}>
+                      {formatDate(workout.created_at)} • {workout.duration_minutes || 30} min
+                    </Text>
+                  </View>
+                  <View style={[styles.recentRatingBadge, { backgroundColor: getRatingColor(workout.rating) + '20' }]}>
+                    <Text style={[styles.recentRatingText, { color: getRatingColor(workout.rating) }]}>
+                      {workout.rating}/5
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+              
+              {workoutHistory.length === 0 && (
+                <View style={styles.noRecentActivity}>
+                  <Ionicons name="calendar-outline" size={48} color="#667eea" style={styles.noRecentIcon} />
+                  <Text style={styles.noRecentText}>No workouts yet</Text>
+                  <Text style={styles.noRecentSubtext}>Start your fitness journey today!</Text>
+                  <TouchableOpacity 
+                    style={styles.startButton}
+                    onPress={() => setActiveTab('workout')}
+                  >
+                    <Text style={styles.startButtonText}>Start First Workout</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            {/* Daily Tip */}
+            <View style={styles.tipCard}>
+              <LinearGradient
+                colors={['rgba(255, 241, 242, 0.9)', 'rgba(233, 246, 255, 0.9)']}
+                style={styles.tipGradient}
+              >
+                <View style={styles.tipIcon}>
+                  <Ionicons name="bulb-outline" size={24} color="#667eea" />
+                </View>
+                <View style={styles.tipContent}>
+                  <Text style={styles.tipTitle}>Daily Tip</Text>
+                  <Text style={styles.tipText}>
+                    Stay hydrated! Drink at least 8 glasses of water throughout your workout for better performance.
+                  </Text>
+                </View>
+              </LinearGradient>
+            </View>
+          </ScrollView>
         );
 
       case 'workout':
         return (
-          <ImageBackground 
-            source={require('../assets/images/workout-bg.jpg')}
-            style={styles.backgroundImage}
-            resizeMode="cover"
+          <ScrollView 
+            style={styles.tabScrollView}
+            contentContainerStyle={[styles.tabScrollContent, styles.workoutTabContent]}
+            showsVerticalScrollIndicator={false}
           >
-            <ScrollView 
-              style={styles.tabScrollView}
-              contentContainerStyle={styles.tabScrollContent}
-              showsVerticalScrollIndicator={false}
+            {/* Workout Header */}
+            <LinearGradient
+              colors={['rgba(102, 126, 234, 0.85)', 'rgba(118, 75, 162, 0.85)']}
+              style={styles.workoutHeader}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
             >
-              <View style={styles.workoutHeader}>
-                <Text style={styles.workoutTabTitle}>Workout Plans</Text>
-                <Text style={styles.workoutTabSubtitle}>Your AI-generated workouts</Text>
+              <View style={styles.workoutHeaderContent}>
+                <Text style={styles.workoutTabTitle}>Workouts</Text>
+                <Text style={styles.workoutTabSubtitle}>AI-powered personalized fitness</Text>
+              </View>
+            </LinearGradient>
+
+            {/* Generate Workout Section */}
+            <View style={styles.generateSection}>
+              <View style={styles.generateHeader}>
+                <View>
+                  <Text style={styles.generateTitle}>Generate New Workout</Text>
+                  <Text style={styles.generateSubtitle}>Based on your fitness profile & goals</Text>
+                </View>
+                {workoutPlan && (
+                  <TouchableOpacity 
+                    style={styles.refreshButton}
+                    onPress={generateWorkout}
+                    disabled={loading}
+                  >
+                    <LinearGradient
+                      colors={['rgba(102, 126, 234, 0.9)', 'rgba(118, 75, 162, 0.9)']}
+                      style={styles.refreshGradient}
+                    >
+                      <Ionicons name="refresh" size={20} color="white" />
+                    </LinearGradient>
+                  </TouchableOpacity>
+                )}
               </View>
 
-              {workoutPlan ? (
+              {!workoutPlan ? (
+                <View style={styles.noWorkoutContainer}>
+                  <LinearGradient
+                    colors={['rgba(255, 255, 255, 0.95)', 'rgba(245, 245, 245, 0.95)']}
+                    style={styles.noWorkoutGradient}
+                  >
+                    <View style={styles.noWorkoutIcon}>
+                      <FontAwesome5 name="dumbbell" size={50} color="rgba(102, 126, 234, 0.7)" />
+                      <View style={styles.sparkleEffect}>
+                        <Ionicons name="sparkles" size={24} color="#FFD700" />
+                      </View>
+                    </View>
+                    <Text style={styles.noWorkoutTitle}>No Workout Generated</Text>
+                    <Text style={styles.noWorkoutText}>
+                      Generate a personalized workout based on your fitness profile and goals
+                    </Text>
+                    <TouchableOpacity 
+                      style={styles.generateButton}
+                      onPress={generateWorkout}
+                      disabled={loading}
+                    >
+                      <LinearGradient
+                        colors={['rgba(102, 126, 234, 0.9)', 'rgba(118, 75, 162, 0.9)']}
+                        style={styles.generateGradient}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                      >
+                        {loading ? (
+                          <ActivityIndicator color="white" size="small" />
+                        ) : (
+                          <>
+                            <Ionicons name="sparkles" size={20} color="white" />
+                            <Text style={styles.generateButtonText}>Generate Workout</Text>
+                            <Ionicons name="arrow-forward" size={16} color="white" style={styles.arrowIcon} />
+                          </>
+                        )}
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  </LinearGradient>
+                </View>
+              ) : (
                 <View style={styles.workoutPlanCard}>
                   <LinearGradient
-                    colors={['rgba(168, 237, 234, 0.9)', 'rgba(254, 214, 227, 0.9)']}
+                    colors={['rgba(168, 237, 234, 0.95)', 'rgba(254, 214, 227, 0.95)']}
                     style={styles.workoutPlanGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
                   >
+                    {/* Plan Header */}
                     <View style={styles.workoutPlanHeader}>
                       <View>
                         <Text style={styles.workoutPlanTitle}>
@@ -368,147 +750,158 @@ export default function DashboardScreen({ navigation }) {
                         </Text>
                         <View style={styles.workoutPlanBadge}>
                           <Ionicons name="sparkles" size={10} color="#ff6b6b" />
-                          <Text style={styles.workoutPlanBadgeText}>AI GENERATED</Text>
+                          <Text style={styles.workoutPlanBadgeText}>AI Generated</Text>
                         </View>
                       </View>
-                      <TouchableOpacity 
-                        style={styles.refreshButton}
-                        onPress={generateWorkout}
-                        disabled={loading}
-                      >
-                        <Ionicons name="refresh" size={18} color="#667eea" />
+                      <TouchableOpacity style={styles.saveButton}>
+                        <Ionicons name="bookmark-outline" size={20} color="#667eea" />
                       </TouchableOpacity>
                     </View>
 
+                    {/* Plan Details */}
                     <View style={styles.workoutPlanDetails}>
-                      <View style={styles.detailItem}>
-                        <Ionicons name="speedometer" size={14} color="#666" />
-                        <Text style={styles.detailText}>
-                          {workoutPlan.workout?.fitness_level || workoutPlan.fitness_level}
-                        </Text>
-                      </View>
-                      <View style={styles.detailItem}>
-                        <Ionicons name="flag" size={14} color="#666" />
-                        <Text style={styles.detailText}>
-                          {workoutPlan.workout?.goal || workoutPlan.goal}
-                        </Text>
-                      </View>
-                      <View style={styles.detailItem}>
-                        <Ionicons name="time" size={14} color="#666" />
-                        <Text style={styles.detailText}>
-                          {workoutPlan.workout?.duration || workoutPlan.duration} mins
-                        </Text>
-                      </View>
-                      <View style={styles.detailItem}>
-                        <Ionicons name="calendar" size={14} color="#666" />
-                        <Text style={styles.detailText}>
-                          {workoutPlan.workout?.days_per_week || workoutPlan.days_per_week} days/week
-                        </Text>
-                      </View>
-                    </View>
-
-                    <Text style={styles.exercisesTitle}>Exercises</Text>
-                    <View style={styles.exercisesList}>
-                      {(workoutPlan.workout?.exercises || workoutPlan.exercises || []).map((exercise, index) => (
-                        <View key={index} style={styles.exerciseItem}>
-                          <View style={styles.exerciseBullet}>
-                            <Text style={styles.exerciseNumber}>{index + 1}</Text>
-                          </View>
-                          <Text style={styles.exerciseText}>{exercise}</Text>
+                      <View style={styles.detailCard}>
+                        <Ionicons name="speedometer" size={16} color="#667eea" />
+                        <View>
+                          <Text style={styles.detailLabel}>Level</Text>
+                          <Text style={styles.detailValue}>
+                            {workoutPlan.workout?.fitness_level || workoutPlan.fitness_level}
+                          </Text>
                         </View>
-                      ))}
+                      </View>
+                      
+                      <View style={styles.detailCard}>
+                        <Ionicons name="flag" size={16} color="#FF6B6B" />
+                        <View>
+                          <Text style={styles.detailLabel}>Goal</Text>
+                          <Text style={styles.detailValue}>
+                            {workoutPlan.workout?.goal || workoutPlan.goal}
+                          </Text>
+                        </View>
+                      </View>
+                      
+                      <View style={styles.detailCard}>
+                        <Ionicons name="time" size={16} color="#4CAF50" />
+                        <View>
+                          <Text style={styles.detailLabel}>Duration</Text>
+                          <Text style={styles.detailValue}>
+                            {workoutPlan.workout?.duration || workoutPlan.duration} min
+                          </Text>
+                        </View>
+                      </View>
                     </View>
 
-                    {/* Workout Logging Section */}
-                    <View style={styles.loggingSection}>
-                      <Text style={styles.loggingTitle}>Complete This Workout?</Text>
+                    {/* Exercises Section */}
+                    <View style={styles.exercisesSection}>
+                      <View style={styles.sectionHeader}>
+                        <Text style={styles.exercisesTitle}>Exercises</Text>
+                        <Text style={styles.exerciseCount}>
+                          {(workoutPlan.workout?.exercises || workoutPlan.exercises || []).length} exercises
+                        </Text>
+                      </View>
                       
+                      <View style={styles.exercisesList}>
+                        {(workoutPlan.workout?.exercises || workoutPlan.exercises || []).map((exercise, index) => (
+                          <View key={index} style={styles.exerciseCard}>
+                            <View style={styles.exerciseNumber}>
+                              <Text style={styles.exerciseNumberText}>{index + 1}</Text>
+                            </View>
+                            <Text style={styles.exerciseText}>{exercise}</Text>
+                            <View style={styles.exerciseCheck}>
+                              <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+
+                    {/* Action Buttons */}
+                    <View style={styles.actionButtons}>
                       <TouchableOpacity 
-                        style={[styles.logWorkoutButton, loggingWorkout && styles.buttonDisabled]}
-                        onPress={quickLogWorkout}
-                        disabled={loggingWorkout}
+                        style={styles.logWorkoutButton}
+                        onPress={() => setShowLogModal(true)}
                       >
                         <LinearGradient
                           colors={['rgba(67, 233, 123, 0.9)', 'rgba(56, 249, 215, 0.9)']}
                           style={styles.logWorkoutGradient}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
                         >
-                          {loggingWorkout ? (
-                            <ActivityIndicator color="white" size="small" />
-                          ) : (
-                            <>
-                              <Ionicons name="checkmark-circle" size={20} color="white" />
-                              <Text style={styles.logWorkoutButtonText}>Log Workout</Text>
-                            </>
-                          )}
+                          <Ionicons name="checkmark-circle" size={20} color="white" />
+                          <Text style={styles.logWorkoutButtonText}>Log This Workout</Text>
                         </LinearGradient>
+                      </TouchableOpacity>
+                      
+                      <TouchableOpacity 
+                        style={styles.shareButton}
+                        onPress={() => Alert.alert('Coming Soon', 'Share feature will be available soon!')}
+                      >
+                        <Ionicons name="share-social" size={20} color="#667eea" />
+                        <Text style={styles.shareButtonText}>Share</Text>
                       </TouchableOpacity>
                     </View>
                   </LinearGradient>
                 </View>
-              ) : (
-                <View style={styles.noWorkoutContainer}>
-                  <View style={styles.noWorkoutIcon}>
-                    <FontAwesome5 name="dumbbell" size={50} color="rgba(255, 255, 255, 0.7)" />
-                  </View>
-                  <Text style={styles.noWorkoutTitle}>No Workout Generated</Text>
-                  <Text style={styles.noWorkoutText}>
-                    Get started with your first AI-powered workout
-                  </Text>
-                  <TouchableOpacity 
-                    style={styles.generateButton}
-                    onPress={generateWorkout}
-                    disabled={loading}
-                  >
-                    <LinearGradient
-                      colors={['rgba(250, 112, 154, 0.9)', 'rgba(254, 225, 64, 0.9)']}
-                      style={styles.generateGradient}
-                    >
-                      {loading ? (
-                        <ActivityIndicator color="white" size="small" />
-                      ) : (
-                        <>
-                          <Ionicons name="sparkles" size={20} color="white" />
-                          <Text style={styles.generateButtonText}>Generate Workout</Text>
-                        </>
-                      )}
-                    </LinearGradient>
-                  </TouchableOpacity>
-                </View>
               )}
-            </ScrollView>
-          </ImageBackground>
+            </View>
+          </ScrollView>
         );
 
       case 'history':
         return (
-          <ImageBackground 
-            source={require('../assets/images/logo.jpg')}
-            style={styles.backgroundImage}
-            resizeMode="cover"
+          <ScrollView 
+            style={styles.tabScrollView}
+            contentContainerStyle={[styles.tabScrollContent, styles.historyTabContent]}
+            showsVerticalScrollIndicator={false}
           >
-            <ScrollView 
-              style={styles.tabScrollView}
-              contentContainerStyle={styles.tabScrollContent}
-              showsVerticalScrollIndicator={false}
+            {/* History Header */}
+            <LinearGradient
+              colors={['rgba(102, 126, 234, 0.85)', 'rgba(118, 75, 162, 0.85)']}
+              style={styles.historyHeader}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
             >
-              <View style={styles.historyHeader}>
+              <View style={styles.historyHeaderContent}>
                 <Text style={styles.historyTitle}>Workout History</Text>
                 <Text style={styles.historySubtitle}>Track your fitness journey</Text>
-              </View>
-              
-              {historyLoading ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color="#667eea" />
-                  <Text style={styles.loadingText}>Loading history...</Text>
+                
+                {/* Stats Overview */}
+                <View style={styles.historyStats}>
+                  <View style={styles.historyStatItem}>
+                    <Text style={styles.historyStatValue}>{stats.totalWorkouts}</Text>
+                    <Text style={styles.historyStatLabel}>Total</Text>
+                  </View>
+                  <View style={styles.historyStatDivider} />
+                  <View style={styles.historyStatItem}>
+                    <Text style={styles.historyStatValue}>{stats.caloriesBurned}</Text>
+                    <Text style={styles.historyStatLabel}>Calories</Text>
+                  </View>
+                  <View style={styles.historyStatDivider} />
+                  <View style={styles.historyStatItem}>
+                    <Text style={styles.historyStatValue}>{stats.avgRating}</Text>
+                    <Text style={styles.historyStatLabel}>Avg Rating</Text>
+                  </View>
                 </View>
-              ) : workoutHistory.length === 0 ? (
-                <View style={styles.historyPlaceholder}>
+              </View>
+            </LinearGradient>
+            
+            {historyLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#667eea" />
+                <Text style={styles.loadingText}>Loading history...</Text>
+              </View>
+            ) : workoutHistory.length === 0 ? (
+              <View style={styles.historyPlaceholder}>
+                <LinearGradient
+                  colors={['rgba(255, 255, 255, 0.95)', 'rgba(245, 245, 245, 0.95)']}
+                  style={styles.historyPlaceholderGradient}
+                >
                   <View style={styles.historyIcon}>
-                    <MaterialCommunityIcons name="history" size={60} color="rgba(255, 255, 255, 0.7)" />
+                    <MaterialCommunityIcons name="history" size={60} color="rgba(102, 126, 234, 0.7)" />
                   </View>
                   <Text style={styles.historyPlaceholderTitle}>No History Yet</Text>
                   <Text style={styles.historyPlaceholderText}>
-                    Complete your first workout to see history
+                    Complete your first workout to start tracking your progress
                   </Text>
                   <TouchableOpacity 
                     style={styles.startWorkoutButton}
@@ -517,143 +910,254 @@ export default function DashboardScreen({ navigation }) {
                     <LinearGradient
                       colors={['rgba(102, 126, 234, 0.9)', 'rgba(118, 75, 162, 0.9)']}
                       style={styles.startWorkoutGradient}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
                     >
-                      <Text style={styles.startWorkoutButtonText}>Go to Workouts</Text>
+                      <Ionicons name="add-circle" size={20} color="white" />
+                      <Text style={styles.startWorkoutButtonText}>Start Workout</Text>
                     </LinearGradient>
                   </TouchableOpacity>
-                </View>
-              ) : (
-                <View style={styles.historyList}>
+                </LinearGradient>
+              </View>
+            ) : (
+              <View style={styles.historyList}>
+                <View style={styles.sectionHeader}>
                   <Text style={styles.historySectionTitle}>
-                    Completed Workouts: {workoutHistory.length}
+                    Recent Workouts
                   </Text>
-                  
-                  {workoutHistory.map((workout) => (
-                    <TouchableOpacity 
-                      key={workout.id}
-                      style={styles.historyWorkoutCard}
-                      onPress={() => setSelectedWorkout(selectedWorkout?.id === workout.id ? null : workout)}
+                  <TouchableOpacity style={styles.filterButton}>
+                    <Ionicons name="filter" size={18} color="#667eea" />
+                    <Text style={styles.filterText}>Filter</Text>
+                  </TouchableOpacity>
+                </View>
+                
+                {workoutHistory.map((workout) => (
+                  <TouchableOpacity 
+                    key={workout.id}
+                    style={styles.historyWorkoutCard}
+                    onPress={() => navigation.navigate('WorkoutDetails', { workoutId: workout.id })}
+                  >
+                    <LinearGradient
+                      colors={['rgba(255, 255, 255, 0.98)', 'rgba(248, 249, 250, 0.98)']}
+                      style={styles.historyWorkoutGradient}
                     >
                       <View style={styles.historyWorkoutHeader}>
+                        <View style={styles.historyWorkoutIcon}>
+                          <FontAwesome5 name="running" size={16} color="#667eea" />
+                        </View>
                         <View style={styles.historyWorkoutInfo}>
-                          <Text style={styles.historyWorkoutDate}>
-                            {formatDate(workout.created_at)}
-                          </Text>
                           <Text style={styles.historyWorkoutPlan}>
                             {workout.workout_plan?.plan_name || 'Workout Session'}
                           </Text>
+                          <Text style={styles.historyWorkoutDate}>
+                            {formatDate(workout.created_at)} • {workout.duration_minutes || 30} min
+                          </Text>
                         </View>
-                        <View style={[styles.historyRatingBadge, { backgroundColor: getRatingColor(workout.rating) }]}>
-                          <Text style={styles.historyRatingText}>{workout.rating}/5</Text>
+                        <View style={[styles.historyRatingBadge, { backgroundColor: getRatingColor(workout.rating) + '20' }]}>
+                          <Text style={[styles.historyRatingText, { color: getRatingColor(workout.rating) }]}>
+                            {workout.rating}/5
+                          </Text>
                         </View>
                       </View>
-
-                      {selectedWorkout?.id === workout.id && (
-                        <View style={styles.historyWorkoutDetails}>
-                          <Text style={styles.historyFeedbackTitle}>AI Feedback:</Text>
-                          <Text style={styles.historyFeedbackText}>{workout.feedback_text}</Text>
-                          
-                          {workout.workout_plan?.exercises && (
-                            <>
-                              <Text style={styles.historyExercisesTitle}>Exercises:</Text>
-                              {workout.workout_plan.exercises.slice(0, 5).map((exercise, idx) => (
-                                <Text key={idx} style={styles.historyExercise}>• {exercise}</Text>
-                              ))}
-                              {workout.workout_plan.exercises.length > 5 && (
-                                <Text style={styles.historyMoreExercises}>
-                                  +{workout.workout_plan.exercises.length - 5} more exercises
-                                </Text>
-                              )}
-                            </>
-                          )}
+                      
+                      <View style={styles.historyWorkoutFooter}>
+                        <View style={styles.completionBadge}>
+                          <Ionicons name="checkmark-circle" size={14} color="#4CAF50" />
+                          <Text style={styles.completionText}>
+                            {workout.completion_rate || 100}% completed
+                          </Text>
                         </View>
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-            </ScrollView>
-          </ImageBackground>
+                        <View style={styles.difficultyBadge}>
+                          <Ionicons name="speedometer" size={14} color="#FF9800" />
+                          <Text style={styles.difficultyText}>
+                            Difficulty: {workout.difficulty_rating || 3}/5
+                          </Text>
+                        </View>
+                      </View>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </ScrollView>
         );
 
       case 'profile':
         return (
-          <ImageBackground 
-            source={require('../assets/images/profile-bg.jpg')}
-            style={styles.backgroundImage}
-            resizeMode="cover"
+          <ScrollView 
+            style={styles.tabScrollView}
+            contentContainerStyle={[styles.tabScrollContent, styles.profileTabContent]}
+            showsVerticalScrollIndicator={false}
           >
-            <ScrollView 
-              style={styles.tabScrollView}
-              contentContainerStyle={styles.tabScrollContent}
-              showsVerticalScrollIndicator={false}
+            {/* Profile Header */}
+            <LinearGradient
+              colors={['rgba(102, 126, 234, 0.95)', 'rgba(118, 75, 162, 0.95)']}
+              style={styles.profileHeader}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
             >
-              <View style={styles.profileHeader}>
-                <LinearGradient
-                  colors={['rgba(102, 126, 234, 0.9)', 'rgba(118, 75, 162, 0.9)']}
-                  style={styles.profileHeaderGradient}
-                >
+              <View style={styles.profileHeaderContent}>
+                <View style={styles.profileAvatarContainer}>
                   <View style={styles.profileAvatar}>
                     <Text style={styles.profileAvatarText}>
                       {user?.username?.charAt(0).toUpperCase() || 'U'}
                     </Text>
                   </View>
-                  <Text style={styles.profileName}>{user?.username || 'User'}</Text>
-                  <Text style={styles.profileEmail}>{user?.email || 'user@example.com'}</Text>
-                </LinearGradient>
+                  <TouchableOpacity style={styles.cameraButton}>
+                    <Ionicons name="camera" size={14} color="white" />
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.profileName}>{user?.username || 'User'}</Text>
+                <Text style={styles.profileEmail}>{user?.email || 'user@example.com'}</Text>
+                <View style={styles.profileStats}>
+                  <View style={styles.profileStatItem}>
+                    <Text style={styles.profileStatValue}>{stats.streakDays}</Text>
+                    <Text style={styles.profileStatLabel}>Day Streak</Text>
+                  </View>
+                  <View style={styles.profileStatDivider} />
+                  <View style={styles.profileStatItem}>
+                    <Text style={styles.profileStatValue}>{stats.totalWorkouts}</Text>
+                    <Text style={styles.profileStatLabel}>Workouts</Text>
+                  </View>
+                  <View style={styles.profileStatDivider} />
+                  <View style={styles.profileStatItem}>
+                    <Text style={styles.profileStatValue}>{stats.avgRating}</Text>
+                    <Text style={styles.profileStatLabel}>Avg Rating</Text>
+                  </View>
+                </View>
               </View>
+            </LinearGradient>
 
-              <View style={styles.profileContent}>
-                <Text style={styles.profileSectionTitle}>Account Settings</Text>
-                
-                <TouchableOpacity style={styles.profileMenuItem}>
-                  <View style={styles.menuItemIcon}>
-                    <Ionicons name="person" size={20} color="#667eea" />
-                  </View>
-                  <View style={styles.menuItemContent}>
-                    <Text style={styles.menuItemTitle}>Edit Profile</Text>
-                    <Text style={styles.menuItemSubtitle}>Update personal information</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color="#ccc" />
-                </TouchableOpacity>
-
-                <TouchableOpacity 
-                  style={styles.profileMenuItem}
-                  onPress={() => navigation.navigate('FitnessProfile')}
+            {/* Account Settings */}
+            <View style={styles.profileContent}>
+              <Text style={styles.profileSectionTitle}>Account Settings</Text>
+              
+              <TouchableOpacity 
+                style={styles.profileMenuItem}
+                onPress={() => navigation.navigate('FitnessProfile')}
+              >
+                <LinearGradient
+                  colors={['rgba(255, 255, 255, 0.9)', 'rgba(248, 249, 250, 0.9)']}
+                  style={styles.menuItemGradient}
                 >
-                  <View style={styles.menuItemIcon}>
-                    <Ionicons name="fitness" size={20} color="#43e97b" />
+                  <View style={[styles.menuItemIcon, { backgroundColor: '#667eea' }]}>
+                    <Ionicons name="fitness" size={20} color="white" />
                   </View>
                   <View style={styles.menuItemContent}>
                     <Text style={styles.menuItemTitle}>Fitness Profile</Text>
                     <Text style={styles.menuItemSubtitle}>Update goals & preferences</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={18} color="#ccc" />
-                </TouchableOpacity>
+                  <AntDesign name="right" size={16} color="#999" />
+                </LinearGradient>
+              </TouchableOpacity>
 
-                <TouchableOpacity style={styles.profileMenuItem}>
-                  <View style={styles.menuItemIcon}>
-                    <Ionicons name="notifications" size={20} color="#ff6b6b" />
+              <TouchableOpacity style={styles.profileMenuItem}>
+                <LinearGradient
+                  colors={['rgba(255, 255, 255, 0.9)', 'rgba(248, 249, 250, 0.9)']}
+                  style={styles.menuItemGradient}
+                >
+                  <View style={[styles.menuItemIcon, { backgroundColor: '#ff6b6b' }]}>
+                    <Ionicons name="notifications" size={20} color="white" />
                   </View>
                   <View style={styles.menuItemContent}>
                     <Text style={styles.menuItemTitle}>Notifications</Text>
-                    <Text style={styles.menuItemSubtitle}>Manage reminders</Text>
+                    <Text style={styles.menuItemSubtitle}>Manage reminders & alerts</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={18} color="#ccc" />
-                </TouchableOpacity>
+                  <AntDesign name="right" size={16} color="#999" />
+                </LinearGradient>
+              </TouchableOpacity>
 
-                <View style={styles.logoutContainer}>
-                  <TouchableOpacity 
-                    style={styles.logoutButton}
-                    onPress={handleLogout}
+              <TouchableOpacity style={styles.profileMenuItem}>
+                <LinearGradient
+                  colors={['rgba(255, 255, 255, 0.9)', 'rgba(248, 249, 250, 0.9)']}
+                  style={styles.menuItemGradient}
+                >
+                  <View style={[styles.menuItemIcon, { backgroundColor: '#43e97b' }]}>
+                    <Ionicons name="settings" size={20} color="white" />
+                  </View>
+                  <View style={styles.menuItemContent}>
+                    <Text style={styles.menuItemTitle}>Settings</Text>
+                    <Text style={styles.menuItemSubtitle}>App preferences & themes</Text>
+                  </View>
+                  <AntDesign name="right" size={16} color="#999" />
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.profileMenuItem}>
+                <LinearGradient
+                  colors={['rgba(255, 255, 255, 0.9)', 'rgba(248, 249, 250, 0.9)']}
+                  style={styles.menuItemGradient}
+                >
+                  <View style={[styles.menuItemIcon, { backgroundColor: '#FFD700' }]}>
+                    <Ionicons name="help-circle" size={20} color="white" />
+                  </View>
+                  <View style={styles.menuItemContent}>
+                    <Text style={styles.menuItemTitle}>Help & Support</Text>
+                    <Text style={styles.menuItemSubtitle}>FAQ & contact support</Text>
+                  </View>
+                  <AntDesign name="right" size={16} color="#999" />
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.profileMenuItem}>
+                <LinearGradient
+                  colors={['rgba(255, 255, 255, 0.9)', 'rgba(248, 249, 250, 0.9)']}
+                  style={styles.menuItemGradient}
+                >
+                  <View style={[styles.menuItemIcon, { backgroundColor: '#673ab7' }]}>
+                    <Ionicons name="document-text" size={20} color="white" />
+                  </View>
+                  <View style={styles.menuItemContent}>
+                    <Text style={styles.menuItemTitle}>Privacy & Terms</Text>
+                    <Text style={styles.menuItemSubtitle}>Privacy policy & terms</Text>
+                  </View>
+                  <AntDesign name="right" size={16} color="#999" />
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.profileMenuItem}>
+                <LinearGradient
+                  colors={['rgba(255, 255, 255, 0.9)', 'rgba(248, 249, 250, 0.9)']}
+                  style={styles.menuItemGradient}
+                >
+                  <View style={[styles.menuItemIcon, { backgroundColor: '#2196F3' }]}>
+                    <Ionicons name="star" size={20} color="white" />
+                  </View>
+                  <View style={styles.menuItemContent}>
+                    <Text style={styles.menuItemTitle}>Rate Us</Text>
+                    <Text style={styles.menuItemSubtitle}>Share your feedback</Text>
+                  </View>
+                  <AntDesign name="right" size={16} color="#999" />
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <View style={styles.logoutContainer}>
+                <TouchableOpacity 
+                  style={styles.logoutButton}
+                  onPress={handleLogout}
+                >
+                  <LinearGradient
+                    colors={['rgba(255, 59, 48, 0.1)', 'rgba(255, 99, 71, 0.05)']}
+                    style={styles.logoutGradient}
                   >
-                    <Ionicons name="log-out" size={20} color="#ff3b30" />
-                    <Text style={styles.logoutButtonText}>Logout</Text>
-                  </TouchableOpacity>
-                </View>
+                    <View style={styles.logoutIcon}>
+                      <Ionicons name="log-out" size={20} color="#ff3b30" />
+                    </View>
+                    <View style={styles.logoutContent}>
+                      <Text style={styles.logoutButtonText}>Logout</Text>
+                      <Text style={styles.logoutSubtext}>Sign out of your account</Text>
+                    </View>
+                  </LinearGradient>
+                </TouchableOpacity>
               </View>
-            </ScrollView>
-          </ImageBackground>
+
+              {/* App Info */}
+              <View style={styles.appInfo}>
+                <Text style={styles.appVersion}>Version 1.0.0</Text>
+                <Text style={styles.appCopyright}>© 2024 FitAI. All rights reserved.</Text>
+              </View>
+            </View>
+          </ScrollView>
         );
 
       default:
@@ -661,77 +1165,254 @@ export default function DashboardScreen({ navigation }) {
     }
   };
 
+  // Workout Log Modal
+  const renderWorkoutLogModal = () => (
+    <Modal
+      visible={showLogModal}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={() => setShowLogModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContainer}>
+          <LinearGradient
+            colors={['rgba(255, 255, 255, 1)', 'rgba(245, 245, 245, 1)']}
+            style={styles.modalGradient}
+          >
+            {/* Modal Header */}
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Log Your Workout</Text>
+                <Text style={styles.modalSubtitle}>Track your performance & progress</Text>
+              </View>
+              <TouchableOpacity 
+                style={styles.modalCloseButton}
+                onPress={() => setShowLogModal(false)}
+              >
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
+              {/* Completion Rate */}
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>Completion</Text>
+                <View style={styles.completionContainer}>
+                  <LinearGradient
+                    colors={['rgba(102, 126, 234, 0.9)', 'rgba(118, 75, 162, 0.9)']}
+                    style={styles.completionCircle}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                  >
+                    <Text style={styles.completionRate}>{workoutLogData.completion_rate}%</Text>
+                  </LinearGradient>
+                  <Text style={styles.completionLabel}>Overall Completion</Text>
+                </View>
+                <Text style={styles.completionSubtext}>
+                  {workoutLogData.exercises_completed.filter(ex => ex.completed).length} of {workoutLogData.exercises_completed.length} exercises completed
+                </Text>
+              </View>
+
+              {/* Exercises Check List */}
+              <View style={styles.modalSection}>
+                <View style={styles.modalSectionHeader}>
+                  <Text style={styles.modalSectionTitle}>Exercises</Text>
+                  <Text style={styles.exerciseCount}>
+                    {workoutLogData.exercises_completed.filter(ex => ex.completed).length}/{workoutLogData.exercises_completed.length}
+                  </Text>
+                </View>
+                <View style={styles.exercisesCheckList}>
+                  {workoutLogData.exercises_completed.map((exercise, index) => (
+                    <TouchableOpacity 
+                      key={index}
+                      style={styles.exerciseCheckItem}
+                      onPress={() => toggleExerciseCompletion(index)}
+                    >
+                      <LinearGradient
+                        colors={exercise.completed ? 
+                          ['rgba(76, 175, 80, 0.9)', 'rgba(56, 142, 60, 0.9)'] : 
+                          ['rgba(245, 245, 245, 0.9)', 'rgba(238, 238, 238, 0.9)']
+                        }
+                        style={[
+                          styles.checkBox,
+                          exercise.completed && styles.checkBoxChecked
+                        ]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                      >
+                        {exercise.completed && (
+                          <Ionicons name="checkmark" size={14} color="white" />
+                        )}
+                      </LinearGradient>
+                      <Text style={[
+                        styles.exerciseCheckText,
+                        exercise.completed && styles.exerciseCheckTextCompleted
+                      ]}>
+                        {exercise.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Difficulty & Energy */}
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>How was it?</Text>
+                <View style={styles.ratingRow}>
+                  <View style={styles.ratingContainer}>
+                    <View style={styles.ratingHeader}>
+                      <Ionicons name="speedometer" size={16} color="#FF9800" />
+                      <Text style={styles.ratingLabel}>Difficulty</Text>
+                    </View>
+                    <View style={styles.starsContainer}>
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <TouchableOpacity
+                          key={star}
+                          onPress={() => setWorkoutLogData(prev => ({ ...prev, difficulty_rating: star }))}
+                        >
+                          <Ionicons
+                            name={star <= workoutLogData.difficulty_rating ? "star" : "star-outline"}
+                            size={28}
+                            color={star <= workoutLogData.difficulty_rating ? "#FF9800" : "#ccc"}
+                            style={styles.starIcon}
+                          />
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    <Text style={styles.ratingValue}>{workoutLogData.difficulty_rating}/5</Text>
+                  </View>
+
+                  <View style={styles.ratingContainer}>
+                    <View style={styles.ratingHeader}>
+                      <Ionicons name="flash" size={16} color="#FFD700" />
+                      <Text style={styles.ratingLabel}>Energy Level</Text>
+                    </View>
+                    <View style={styles.starsContainer}>
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <TouchableOpacity
+                          key={star}
+                          onPress={() => setWorkoutLogData(prev => ({ ...prev, energy_level: star }))}
+                        >
+                          <Ionicons
+                            name={star <= workoutLogData.energy_level ? "flash" : "flash-outline"}
+                            size={28}
+                            color={star <= workoutLogData.energy_level ? "#FFD700" : "#ccc"}
+                            style={styles.starIcon}
+                          />
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    <Text style={styles.ratingValue}>{workoutLogData.energy_level}/5</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Personal Notes */}
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>Personal Notes</Text>
+                <View style={styles.notesInputContainer}>
+                  <Ionicons name="document-text-outline" size={20} color="#667eea" style={styles.notesIcon} />
+                  <TextInput
+                    style={styles.notesInput}
+                    placeholder="How did your workout go? Any notes or achievements?"
+                    value={workoutLogData.personal_notes}
+                    onChangeText={(text) => setWorkoutLogData(prev => ({ ...prev, personal_notes: text }))}
+                    multiline
+                    numberOfLines={4}
+                    maxLength={500}
+                    placeholderTextColor="#999"
+                  />
+                </View>
+                <View style={styles.charCountContainer}>
+                  <Text style={styles.charCount}>
+                    {workoutLogData.personal_notes.length}/500 characters
+                  </Text>
+                </View>
+              </View>
+
+              {/* Submit Button */}
+              <TouchableOpacity 
+                style={[styles.submitButton, loggingWorkout && styles.buttonDisabled]}
+                onPress={enhancedLogWorkout}
+                disabled={loggingWorkout}
+              >
+                <LinearGradient
+                  colors={['rgba(67, 233, 123, 0.9)', 'rgba(56, 249, 215, 0.9)']}
+                  style={styles.submitGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  {loggingWorkout ? (
+                    <ActivityIndicator color="white" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="checkmark-circle" size={20} color="white" />
+                      <Text style={styles.submitButtonText}>Log Workout</Text>
+                      <Ionicons name="arrow-forward" size={16} color="white" style={styles.arrowIcon} />
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </ScrollView>
+          </LinearGradient>
+        </View>
+      </View>
+    </Modal>
+  );
+
   return (
     <SafeAreaView style={styles.safeArea}>
+      {/* Dynamic Background based on active tab */}
+      {renderTabBackground(activeTab)}
+      
       <View style={styles.container}>
         {/* Main Content */}
         <View style={styles.mainContent}>
           {renderTabContent()}
         </View>
 
-        {/* Bottom Navigation - Fixed at bottom */}
+        {/* Bottom Navigation */}
         <View style={styles.bottomNav}>
-          <TouchableOpacity 
-            style={styles.navItem}
-            onPress={() => setActiveTab('home')}
-          >
-            <Ionicons 
-              name={activeTab === 'home' ? "home" : "home-outline"} 
-              size={24} 
-              color={activeTab === 'home' ? '#667eea' : '#666'} 
-            />
-            <Text style={[
-              styles.navText,
-              activeTab === 'home' && styles.navTextActive
-            ]}>Home</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={styles.navItem}
-            onPress={() => setActiveTab('workout')}
-          >
-            <Ionicons 
-              name={activeTab === 'workout' ? "barbell" : "barbell-outline"} 
-              size={24} 
-              color={activeTab === 'workout' ? '#667eea' : '#666'} 
-            />
-            <Text style={[
-              styles.navText,
-              activeTab === 'workout' && styles.navTextActive
-            ]}>Workout</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={styles.navItem}
-            onPress={() => setActiveTab('history')}
-          >
-            <MaterialIcons 
-              name="history" 
-              size={24} 
-              color={activeTab === 'history' ? '#667eea' : '#666'} 
-            />
-            <Text style={[
-              styles.navText,
-              activeTab === 'history' && styles.navTextActive
-            ]}>History</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={styles.navItem}
-            onPress={() => setActiveTab('profile')}
-          >
-            <Ionicons 
-              name={activeTab === 'profile' ? "person" : "person-outline"} 
-              size={24} 
-              color={activeTab === 'profile' ? '#667eea' : '#666'} 
-            />
-            <Text style={[
-              styles.navText,
-              activeTab === 'profile' && styles.navTextActive
-            ]}>Profile</Text>
-          </TouchableOpacity>
+          {['home', 'workout', 'history', 'profile'].map((tab) => (
+            <TouchableOpacity 
+              key={tab}
+              style={styles.navItem}
+              onPress={() => setActiveTab(tab)}
+            >
+              <LinearGradient
+                colors={activeTab === tab ? 
+                  ['rgba(102, 126, 234, 0.2)', 'rgba(118, 75, 162, 0.1)'] : 
+                  ['transparent', 'transparent']
+                }
+                style={styles.navItemBackground}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <Ionicons 
+                  name={
+                    tab === 'home' ? (activeTab === 'home' ? "home" : "home-outline") :
+                    tab === 'workout' ? (activeTab === 'workout' ? "barbell" : "barbell-outline") :
+                    tab === 'history' ? (activeTab === 'history' ? "time" : "time-outline") :
+                    tab === 'profile' ? (activeTab === 'profile' ? "person" : "person-outline") :
+                    ""
+                  } 
+                  size={24} 
+                  color={activeTab === tab ? '#667eea' : '#666'} 
+                />
+                <Text style={[
+                  styles.navText,
+                  activeTab === tab && styles.navTextActive
+                ]}>
+                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          ))}
         </View>
       </View>
+
+      {/* Workout Log Modal */}
+      {renderWorkoutLogModal()}
     </SafeAreaView>
   );
 }
@@ -739,7 +1420,23 @@ export default function DashboardScreen({ navigation }) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#fff',
+  },
+  backgroundImage: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+  },
+  logoBackground: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    opacity: 0.1,
+  },
+  overlay: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
   },
   container: {
     flex: 1,
@@ -747,392 +1444,624 @@ const styles = StyleSheet.create({
   mainContent: {
     flex: 1,
   },
-  backgroundImage: {
-    flex: 1,
-    width: '100%',
-  },
   tabScrollView: {
     flex: 1,
   },
   tabScrollContent: {
-    padding: 12,
-    paddingBottom: 80, // Increased padding to accommodate bottom nav
+    padding: 16,
+    paddingBottom: 80,
   },
-  // Home Tab - Profile Styles
-  profileCard: {
-    height: 160,
-    borderRadius: 16,
+  workoutTabContent: {
+    paddingBottom: 100,
+  },
+  historyTabContent: {
+    paddingBottom: 100,
+  },
+  profileTabContent: {
+    paddingBottom: 100,
+  },
+  
+  // Home Tab Styles
+  welcomeCard: {
+    height: 180,
+    borderRadius: 20,
     overflow: 'hidden',
-    marginBottom: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
+    marginBottom: 20,
+    backgroundColor: '#fff',
+    shadowColor: '#667eea',
+    shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.2,
     shadowRadius: 12,
     elevation: 8,
   },
-  profileGradient: {
+  welcomeGradient: {
     flex: 1,
-    padding: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  profileAvatarContainer: {
-    marginBottom: 8,
-  },
-  profileAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: 'white',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  profileAvatarText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#667eea',
-  },
-  profileName: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 4,
-  },
-  profileEmail: {
-    fontSize: 12,
-    color: 'white',
-    opacity: 0.9,
-  },
-  section: {
-    marginBottom: 20,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: 'white',
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  editButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  editButtonText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#667eea',
-    marginLeft: 4,
-  },
-  fitnessDetailsCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 12,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 4,
-  },
-  statLabel: {
-    fontSize: 10,
-    color: '#666',
-    textAlign: 'center',
-  },
-  detailsGrid: {
-    marginBottom: 12,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  detailLabel: {
-    fontSize: 13,
-    color: '#666',
-    marginLeft: 8,
-    width: 90,
-  },
-  detailValue: {
-    fontSize: 13,
-    color: '#333',
-    fontWeight: '600',
-    textTransform: 'capitalize',
-    flex: 1,
-  },
-  injuriesSection: {
-    backgroundColor: '#fff5f5',
-    padding: 10,
-    borderRadius: 8,
-    marginTop: 8,
-  },
-  injuriesLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#ff6b6b',
-    marginBottom: 4,
-  },
-  injuriesText: {
-    fontSize: 12,
-    color: '#666',
-    lineHeight: 18,
-  },
-  noProfileCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 12,
-    padding: 24,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  noProfileTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginTop: 12,
-    marginBottom: 6,
-  },
-  noProfileText: {
-    fontSize: 12,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 16,
-    lineHeight: 18,
-  },
-  setupButton: {
-    height: 40,
-    borderRadius: 20,
-    overflow: 'hidden',
-    width: 160,
-  },
-  setupGradient: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  setupButtonText: {
-    color: 'white',
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  quickStatsGrid: {
-    flexDirection: 'row',
+    padding: 20,
     justifyContent: 'space-between',
   },
-  quickStatCard: {
-    width: '48%',
-    height: 100,
-    borderRadius: 12,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  quickStatGradient: {
-    flex: 1,
-    padding: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  quickStatNumber: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: 'white',
-    marginVertical: 4,
-  },
-  quickStatLabel: {
-    fontSize: 10,
-    color: 'white',
-    textAlign: 'center',
-    opacity: 0.9,
-  },
-  // Workout Tab Styles
-  workoutHeader: {
-    marginBottom: 16,
-  },
-  workoutTabTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: 'white',
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  workoutTabSubtitle: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginTop: 4,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 1,
-  },
-  workoutPlanCard: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 8,
-  },
-  workoutPlanGradient: {
-    padding: 16,
-  },
-  workoutPlanHeader: {
+  welcomeHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 16,
   },
-  workoutPlanTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    flex: 1,
-  },
-  workoutPlanBadge: {
+  avatarContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-    marginTop: 4,
-    alignSelf: 'flex-start',
   },
-  workoutPlanBadgeText: {
-    fontSize: 9,
-    fontWeight: 'bold',
-    color: '#ff6b6b',
-    marginLeft: 3,
-  },
-  refreshButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  avatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     backgroundColor: 'white',
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  workoutPlanDetails: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginBottom: 16,
+  avatarText: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#667eea',
   },
-  detailItem: {
+  welcomeTextContainer: {
+    flex: 1,
+  },
+  greetingText: {
+    fontSize: 14,
+    color: 'white',
+    opacity: 0.9,
+    marginBottom: 2,
+  },
+  userName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  statsBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'white',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 16,
-    marginRight: 8,
-    marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    borderRadius: 15,
   },
-  detailText: {
+  statsBadgeText: {
     fontSize: 11,
-    color: '#666',
-    marginLeft: 5,
+    color: 'white',
+    fontWeight: '600',
+    marginLeft: 4,
   },
-  exercisesTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 12,
+  quickStats: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 15,
+    padding: 12,
+    alignItems: 'center',
   },
-  exercisesList: {
-    marginBottom: 16,
-  },
-  exerciseItem: {
+  statItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    flex: 1,
   },
-  exerciseBullet: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+  statIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: 'white',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
+    marginRight: 8,
+  },
+  statValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  statLabel: {
+    fontSize: 10,
+    color: 'white',
+    opacity: 0.9,
+    marginTop: 2,
+  },
+  statDivider: {
+    width: 1,
+    height: 30,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    marginHorizontal: 8,
+  },
+  
+  // Section Styles
+  section: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 16,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    letterSpacing: -0.3,
+  },
+  seeAllText: {
+    fontSize: 12,
+    color: '#667eea',
+    fontWeight: '600',
+  },
+  
+  // Quick Actions
+  quickActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  quickActionCard: {
+    width: '48%',
+    height: 110,
+    borderRadius: 15,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  quickActionGradient: {
+    flex: 1,
+    padding: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  quickActionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  quickActionText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  quickActionSubtext: {
+    color: 'white',
+    fontSize: 10,
+    opacity: 0.9,
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  
+  // Fitness Profile
+  fitnessDetailsCard: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 15,
+    padding: 20,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  statContainer: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statCircle: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: 'white',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 2,
+    shadowRadius: 4,
     elevation: 2,
   },
-  exerciseNumber: {
+  statCircleValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  statUnit: {
+    fontSize: 10,
+    color: '#666',
+    marginTop: -2,
+  },
+  statLabelSmall: {
+    fontSize: 11,
+    color: '#666',
+    marginTop: 4,
+  },
+  bmiStatus: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    alignItems: 'center',
+  },
+  bmiStatusText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  
+  // Recent Activity
+  recentWorkoutCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  recentWorkoutIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#667eea20',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  recentWorkoutInfo: {
+    flex: 1,
+  },
+  recentWorkoutName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 2,
+  },
+  recentWorkoutDate: {
+    fontSize: 11,
+    color: '#666',
+  },
+  recentRatingBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  recentRatingText: {
     fontSize: 11,
     fontWeight: 'bold',
-    color: '#667eea',
+  },
+  noRecentActivity: {
+    alignItems: 'center',
+    padding: 24,
+  },
+  noRecentIcon: {
+    marginBottom: 12,
+  },
+  noRecentText: {
+    fontSize: 16,
+    color: '#333',
+    marginBottom: 4,
+  },
+  noRecentSubtext: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  startButton: {
+    backgroundColor: '#667eea',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+  startButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  
+  // Tip Card
+  tipCard: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  tipGradient: {
+    flexDirection: 'row',
+    padding: 16,
+    alignItems: 'center',
+  },
+  tipIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(102, 126, 234, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  tipContent: {
+    flex: 1,
+  },
+  tipTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  tipText: {
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 16,
+  },
+  
+  // Workout Tab Styles
+  workoutHeader: {
+    padding: 20,
+    borderRadius: 20,
+    marginBottom: 20,
+    shadowColor: '#667eea',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  workoutHeaderContent: {
+    alignItems: 'center',
+  },
+  workoutTabTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 6,
+  },
+  workoutTabSubtitle: {
+    fontSize: 14,
+    color: 'white',
+    opacity: 0.9,
+  },
+  
+  generateSection: {
+    marginBottom: 20,
+  },
+  generateHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  generateTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  generateSubtitle: {
+    fontSize: 12,
+    color: '#666',
+  },
+  refreshButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    overflow: 'hidden',
+  },
+  refreshGradient: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  
+  noWorkoutContainer: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  noWorkoutGradient: {
+    padding: 32,
+    alignItems: 'center',
+  },
+  noWorkoutIcon: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(102, 126, 234, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+    position: 'relative',
+  },
+  sparkleEffect: {
+    position: 'absolute',
+    top: -10,
+    right: -10,
+  },
+  noWorkoutTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+  },
+  noWorkoutText: {
+    fontSize: 13,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  generateButton: {
+    height: 50,
+    borderRadius: 25,
+    overflow: 'hidden',
+    width: '100%',
+    maxWidth: 240,
+  },
+  generateGradient: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  generateButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 8,
+    marginRight: 4,
+  },
+  arrowIcon: {
+    marginLeft: 4,
+  },
+  
+  workoutPlanCard: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  workoutPlanGradient: {
+    padding: 20,
+  },
+  workoutPlanHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 20,
+  },
+  workoutPlanTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+  },
+  workoutPlanBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+  },
+  workoutPlanBadgeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#ff6b6b',
+    marginLeft: 4,
+  },
+  saveButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  
+  workoutPlanDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  detailCard: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    padding: 12,
+    borderRadius: 12,
+    marginHorizontal: 4,
+    alignItems: 'center',
+  },
+  detailLabel: {
+    fontSize: 10,
+    color: '#666',
+    marginTop: 4,
+  },
+  detailValue: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 2,
+  },
+  
+  exercisesSection: {
+    marginBottom: 20,
+  },
+  exercisesTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  exerciseCount: {
+    fontSize: 12,
+    color: '#666',
+  },
+  exercisesList: {
+    marginTop: 12,
+  },
+  exerciseCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  exerciseNumber: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#667eea',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  exerciseNumberText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: 'white',
   },
   exerciseText: {
     fontSize: 13,
     color: '#333',
     flex: 1,
   },
-  loggingSection: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 8,
+  exerciseCheck: {
+    marginLeft: 8,
   },
-  loggingTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 12,
-    textAlign: 'center',
+  
+  actionButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   logWorkoutButton: {
-    height: 48,
-    borderRadius: 24,
+    flex: 1,
+    height: 50,
+    borderRadius: 25,
     overflow: 'hidden',
+    marginRight: 12,
   },
   logWorkoutGradient: {
     flex: 1,
@@ -1142,88 +2071,83 @@ const styles = StyleSheet.create({
   },
   logWorkoutButtonText: {
     color: 'white',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: 'bold',
     marginLeft: 8,
   },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  noWorkoutContainer: {
-    justifyContent: 'center',
+  shareButton: {
+    flexDirection: 'row',
     alignItems: 'center',
-    padding: 30,
-    minHeight: 300,
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: 25,
+    borderWidth: 1,
+    borderColor: '#667eea',
   },
-  noWorkoutIcon: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  shareButtonText: {
+    color: '#667eea',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginLeft: 6,
+  },
+  
+  // History Tab Styles
+  historyHeader: {
+    padding: 20,
+    borderRadius: 20,
+    marginBottom: 20,
+    shadowColor: '#667eea',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  historyHeaderContent: {
     alignItems: 'center',
-    justifyContent: 'center',
+  },
+  historyTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 6,
+  },
+  historySubtitle: {
+    fontSize: 14,
+    color: 'white',
+    opacity: 0.9,
     marginBottom: 16,
   },
-  noWorkoutTitle: {
+  historyStats: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    borderRadius: 15,
+    padding: 12,
+    alignItems: 'center',
+    width: '100%',
+  },
+  historyStatItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  historyStatValue: {
     fontSize: 18,
     fontWeight: 'bold',
     color: 'white',
-    marginBottom: 8,
-    textAlign: 'center',
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
   },
-  noWorkoutText: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.9)',
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 18,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 1,
-  },
-  generateButton: {
-    height: 48,
-    borderRadius: 24,
-    overflow: 'hidden',
-    width: '100%',
-    maxWidth: 220,
-  },
-  generateGradient: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  generateButtonText: {
+  historyStatLabel: {
+    fontSize: 10,
     color: 'white',
-    fontSize: 15,
-    fontWeight: 'bold',
-    marginLeft: 8,
+    opacity: 0.9,
+    marginTop: 2,
   },
-  // History Tab Styles
-  historyHeader: {
-    marginBottom: 16,
+  historyStatDivider: {
+    width: 1,
+    height: 30,
+    backgroundColor: 'rgba(255, 255, 255, 0.4)',
+    marginHorizontal: 8,
   },
-  historyTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: 'white',
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-  historySubtitle: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginTop: 4,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 1,
-  },
+  
   loadingContainer: {
     justifyContent: 'center',
     alignItems: 'center',
@@ -1232,54 +2156,54 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 12,
     fontSize: 14,
-    color: 'white',
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 1,
+    color: '#666',
   },
+  
   historyPlaceholder: {
-    justifyContent: 'center',
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  historyPlaceholderGradient: {
+    padding: 40,
     alignItems: 'center',
-    padding: 30,
-    minHeight: 300,
   },
   historyIcon: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(102, 126, 234, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   historyPlaceholderTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: 'white',
+    color: '#333',
     marginBottom: 8,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
   },
   historyPlaceholderText: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 13,
+    color: '#666',
     textAlign: 'center',
     marginBottom: 24,
-    lineHeight: 18,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 1,
+    lineHeight: 20,
   },
   startWorkoutButton: {
     height: 44,
     borderRadius: 22,
     overflow: 'hidden',
     width: '100%',
-    maxWidth: 180,
+    maxWidth: 200,
   },
   startWorkoutGradient: {
     flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1287,199 +2211,340 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     fontWeight: 'bold',
+    marginLeft: 8,
   },
+  
   historyList: {
     marginBottom: 20,
   },
   historySectionTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 12,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
+    color: '#333',
   },
+  filterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 15,
+  },
+  filterText: {
+    fontSize: 12,
+    color: '#667eea',
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  
   historyWorkoutCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    padding: 14,
-    borderRadius: 12,
-    marginBottom: 10,
+    borderRadius: 15,
+    overflow: 'hidden',
+    marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.05,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 2,
+  },
+  historyWorkoutGradient: {
+    padding: 16,
   },
   historyWorkoutHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  historyWorkoutIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#667eea20',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
   historyWorkoutInfo: {
     flex: 1,
-  },
-  historyWorkoutDate: {
-    fontSize: 11,
-    color: '#999',
-    marginBottom: 4,
   },
   historyWorkoutPlan: {
     fontSize: 15,
     fontWeight: 'bold',
     color: '#333',
+    marginBottom: 2,
+  },
+  historyWorkoutDate: {
+    fontSize: 11,
+    color: '#666',
   },
   historyRatingBadge: {
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 12,
-    minWidth: 45,
-    alignItems: 'center',
+    borderRadius: 10,
   },
   historyRatingText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  historyWorkoutDetails: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-  },
-  historyFeedbackTitle: {
-    fontSize: 13,
-    fontWeight: 'bold',
-    marginBottom: 4,
-    color: '#333',
-  },
-  historyFeedbackText: {
-    fontSize: 12,
-    color: '#666',
-    lineHeight: 18,
-    marginBottom: 10,
-  },
-  historyExercisesTitle: {
-    fontSize: 13,
-    fontWeight: 'bold',
-    marginBottom: 6,
-    color: '#333',
-  },
-  historyExercise: {
-    fontSize: 12,
-    color: '#666',
-    marginLeft: 8,
-    marginBottom: 3,
-  },
-  historyMoreExercises: {
     fontSize: 11,
-    color: '#999',
-    fontStyle: 'italic',
-    marginLeft: 8,
-    marginTop: 2,
+    fontWeight: 'bold',
   },
-  // Profile Tab Styles
+  historyWorkoutFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  completionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#4CAF5020',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+  },
+  completionText: {
+    fontSize: 10,
+    color: '#4CAF50',
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  difficultyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FF980020',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+  },
+  difficultyText: {
+    fontSize: 10,
+    color: '#FF9800',
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  
+  // Profile Tab Styles - Enhanced
   profileHeader: {
-    height: 180,
-    borderRadius: 16,
+    height: 240,
+    borderRadius: 20,
     overflow: 'hidden',
-    marginBottom: 16,
-    shadowColor: '#000',
+    marginBottom: 20,
+    shadowColor: '#667eea',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.2,
-    shadowRadius: 16,
+    shadowRadius: 12,
     elevation: 8,
   },
-  profileHeaderGradient: {
+  profileHeaderContent: {
     flex: 1,
-    padding: 16,
+    padding: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  profileAvatarContainer: {
+    position: 'relative',
+    marginBottom: 12,
+  },
+  profileAvatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'white',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  profileAvatarText: {
+    fontSize: 40,
+    fontWeight: 'bold',
+    color: '#667eea',
+  },
+  cameraButton: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#667eea',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  profileName: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  profileEmail: {
+    fontSize: 14,
+    color: 'white',
+    opacity: 0.9,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  profileStats: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    borderRadius: 20,
+    padding: 16,
+    alignItems: 'center',
+    width: '90%',
+  },
+  profileStatItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  profileStatValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  profileStatLabel: {
+    fontSize: 10,
+    color: 'white',
+    opacity: 0.9,
+    marginTop: 4,
+  },
+  profileStatDivider: {
+    width: 1,
+    height: 35,
+    backgroundColor: 'rgba(255, 255, 255, 0.4)',
+    marginHorizontal: 8,
+  },
+  
   profileContent: {
     flex: 1,
   },
   profileSectionTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 12,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
+    color: '#333',
+    marginBottom: 16,
+    paddingHorizontal: 4,
   },
   profileMenuItem: {
+    borderRadius: 15,
+    overflow: 'hidden',
+    marginBottom: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  menuItemGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 8,
+    padding: 16,
+  },
+  menuItemIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
-  },
-  menuItemIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#f5f5f5',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
   },
   menuItemContent: {
     flex: 1,
   },
   menuItemTitle: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
     color: '#333',
   },
   menuItemSubtitle: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#666',
     marginTop: 2,
   },
+  
   logoutContainer: {
     marginTop: 24,
+    marginBottom: 20,
   },
   logoutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    padding: 12,
-    borderRadius: 12,
+    borderRadius: 15,
+    overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.05,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 2,
+  },
+  logoutGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  logoutIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#ff3b3020',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
+  logoutContent: {
+    flex: 1,
   },
   logoutButtonText: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
     color: '#ff3b30',
-    marginLeft: 8,
   },
-  // Bottom Navigation - Updated Styles
+  logoutSubtext: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 2,
+  },
+  
+  appInfo: {
+    alignItems: 'center',
+    padding: 20,
+    marginTop: 10,
+  },
+  appVersion: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 4,
+  },
+  appCopyright: {
+    fontSize: 10,
+    color: '#999',
+  },
+  
+  // Bottom Navigation
   bottomNav: {
     flexDirection: 'row',
-    height: 65,
-    backgroundColor: 'rgba(255, 255, 255, 0.98)',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    height: 75,
+    backgroundColor: 'white',
+    borderTopLeftRadius: 25,
+    borderTopRightRadius: 25,
     paddingHorizontal: 8,
     paddingBottom: 10,
-    paddingTop: 8,
+    paddingTop: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 10,
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 12,
     position: 'absolute',
     bottom: 0,
     left: 0,
@@ -1490,7 +2555,13 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 4,
+  },
+  navItemBackground: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 15,
   },
   navText: {
     fontSize: 11,
@@ -1501,5 +2572,227 @@ const styles = StyleSheet.create({
   navTextActive: {
     color: '#667eea',
     fontWeight: 'bold',
+  },
+  
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    height: '85%',
+    borderTopLeftRadius: 25,
+    borderTopRightRadius: 25,
+    overflow: 'hidden',
+    backgroundColor: 'white',
+  },
+  modalGradient: {
+    flex: 1,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    padding: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  modalSubtitle: {
+    fontSize: 12,
+    color: '#666',
+  },
+  modalCloseButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f5f5f5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalScroll: {
+    flex: 1,
+    padding: 24,
+  },
+  modalSection: {
+    marginBottom: 28,
+  },
+  modalSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  modalSectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  
+  completionContainer: {
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  completionCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    shadowColor: '#667eea',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  completionRate: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  completionLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  completionSubtext: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+  },
+  
+  exercisesCheckList: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 15,
+    padding: 16,
+  },
+  exerciseCheckItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  checkBox: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#ccc',
+    marginRight: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkBoxChecked: {
+    borderWidth: 0,
+  },
+  exerciseCheckText: {
+    fontSize: 14,
+    color: '#333',
+    flex: 1,
+  },
+  exerciseCheckTextCompleted: {
+    textDecorationLine: 'line-through',
+    color: '#999',
+  },
+  exerciseCount: {
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '600',
+  },
+  
+  ratingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  ratingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 15,
+    marginHorizontal: 4,
+  },
+  ratingHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  ratingLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginLeft: 6,
+  },
+  starsContainer: {
+    flexDirection: 'row',
+    marginBottom: 8,
+  },
+  starIcon: {
+    marginHorizontal: 2,
+  },
+  ratingValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  
+  notesInputContainer: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 15,
+    padding: 16,
+    minHeight: 120,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  notesIcon: {
+    marginTop: 2,
+    marginRight: 12,
+  },
+  notesInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#333',
+    textAlignVertical: 'top',
+    minHeight: 100,
+  },
+  charCountContainer: {
+    alignItems: 'flex-end',
+    marginTop: 4,
+  },
+  charCount: {
+    fontSize: 11,
+    color: '#999',
+  },
+  
+  submitButton: {
+    height: 56,
+    borderRadius: 28,
+    overflow: 'hidden',
+    marginTop: 20,
+    marginBottom: 30,
+  },
+  submitGradient: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  submitButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginHorizontal: 8,
+  },
+  buttonDisabled: {
+    opacity: 0.7,
   },
 });

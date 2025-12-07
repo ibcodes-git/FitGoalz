@@ -120,4 +120,5 @@ export const feedbackAPI = {
   
   // Get detailed workout info
   getWorkoutDetails: (workoutId) => api.get(`/api/workout-details/${workoutId}`),
+
 };

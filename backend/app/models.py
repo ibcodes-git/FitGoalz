@@ -36,6 +36,7 @@ class UserProfile(Base):
     goals = Column(String)  # weight_loss, muscle_gain, endurance, general_fitness
     workout_days = Column(Integer)  # days per week
     workout_duration = Column(Integer)  # minutes per session
+    activity_level = Column(String, default="moderate")  # sedentary, light, moderate, active, very_active
 
     # Physical constraints
     injuries = Column(Text)  # any injuries or limitations
